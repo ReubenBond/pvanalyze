@@ -2,6 +2,8 @@
 
 A cross-platform command-line tool for analyzing .NET performance traces (`.nettrace` files).
 
+> Point your coding agent at this repo and let it work. There's intentionally no `SKILL.md` or `AGENTS.md` — `--help` and this README are enough context for today's frontier models, based on my experience.
+
 ## Overview
 
 `pvanalyze` is a companion tool to PerfView that runs on **Mac, Linux, and Windows**. It provides command-line access to trace analysis capabilities, making it ideal for:
@@ -13,15 +15,7 @@ A cross-platform command-line tool for analyzing .NET performance traces (`.nett
 
 ## Installation
 
-```bash
-# Run without installing (.NET 10+)
-dnx pvanalyze
-
-# Or install as a global tool
-dotnet tool install --global pvanalyze
-```
-
-### Build from source
+Build from source:
 
 ```bash
 dotnet build -c Release
