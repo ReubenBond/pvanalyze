@@ -15,10 +15,17 @@ A cross-platform command-line tool for analyzing .NET performance traces (`.nett
 
 ## Installation
 
-Build from source:
+Run directly with `dnx` after the package is published to NuGet:
 
 ```bash
-dotnet build -c Release
+dnx pvanalyze -- info trace.nettrace
+```
+
+Build and run from source:
+
+```bash
+dotnet pack -c Release
+dnx pvanalyze --source ./bin/Release --version 0.1.0 -- info trace.nettrace
 
 # Or publish as a self-contained executable
 dotnet publish -c Release -r osx-arm64 --self-contained
@@ -291,7 +298,7 @@ pvanalyze events trace.nettrace --from 500 --to 1000 --type GC
 
 ## Requirements
 
-- .NET 8.0 or later
+- .NET 10.0 or later
 
 ## Related Tools
 

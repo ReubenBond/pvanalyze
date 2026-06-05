@@ -1,0 +1,40 @@
+name: Pack
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --configuration Release --no-restore
+
+      - name: Pack
+        run: dotnet pack --configuration Release --no-build --output artifacts/packages
+
+      - name: Test package
+        run: dotnet dnx pvanalyze --source artifacts/packages --version 0.1.0 -- --help
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: pvanalyze-nuget-package
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
