@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Diagnostics.Tracing.Stacks;
@@ -18,14 +19,41 @@ public static class CpuStacksCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<StackOutputFormat>("--format", () => StackOutputFormat.Text, "Output format");
-        var topOption = new Option<int>("--top", () => 20, "Number of top items to show");
-        var outputOption = new Option<FileInfo?>("--output", "Output file (default: stdout)");
-        var groupByOption = new Option<GroupBy>("--group-by", () => GroupBy.Method, "Group results by: method, module, or namespace");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var inclusiveOption = new Option<bool>("--inclusive", "Sort by inclusive time instead of exclusive");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<StackOutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => StackOutputFormat.Text,
+            Description = "Output format"
+        };
+        var topOption = new Option<int>("--top")
+        {
+            DefaultValueFactory = _ => 20,
+            Description = "Number of top items to show"
+        };
+        var outputOption = new Option<FileInfo?>("--output")
+        {
+            Description = "Output file (default: stdout)"
+        };
+        var groupByOption = new Option<GroupBy>("--group-by")
+        {
+            DefaultValueFactory = _ => GroupBy.Method,
+            Description = "Group results by: method, module, or namespace"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var inclusiveOption = new Option<bool>("--inclusive")
+        {
+            Description = "Sort by inclusive time instead of exclusive"
+        };
 
         var command = new Command("cpustacks", "Analyze CPU stacks from a trace")
         {
@@ -39,12 +67,23 @@ public static class CpuStacksCommand
             inclusiveOption
         };
 
-        command.SetHandler(Execute, traceFileArg, formatOption, topOption, outputOption, groupByOption, fromOption, toOption, inclusiveOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var top = parseResult.GetValue(topOption)!;
+            var outputFile = parseResult.GetValue(outputOption)!;
+            var groupBy = parseResult.GetValue(groupByOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var inclusive = parseResult.GetValue(inclusiveOption)!;
+            await Execute(traceFile, format, top, outputFile, groupBy, fromMs, toMs, inclusive, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, StackOutputFormat format, int top, FileInfo? outputFile,
-        GroupBy groupBy, double? fromMs, double? toMs, bool sortByInclusive)
+    private static async Task Execute(FileInfo traceFile, StackOutputFormat format, int top, FileInfo? outputFile,
+        GroupBy groupBy, double? fromMs, double? toMs, bool sortByInclusive, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -54,7 +93,7 @@ public static class CpuStacksCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
@@ -82,10 +121,10 @@ public static class CpuStacksCommand
             switch (format)
             {
                 case StackOutputFormat.Speedscope:
-                    OutputSpeedscope(stackSource, traceFile, outputFile);
+                    await OutputSpeedscope(stackSource, traceFile, outputFile, cancellationToken).ConfigureAwait(false);
                     break;
                 case StackOutputFormat.Json:
-                    OutputJson(stackSource, top, outputFile, groupBy, sortByInclusive);
+                    await OutputJson(stackSource, top, outputFile, groupBy, sortByInclusive, cancellationToken).ConfigureAwait(false);
                     break;
                 case StackOutputFormat.Text:
                 default:
@@ -259,7 +298,7 @@ public static class CpuStacksCommand
         }
     }
 
-    private static void OutputJson(StackSource stackSource, int top, FileInfo? outputFile, GroupBy groupBy, bool sortByInclusive)
+    private static async Task OutputJson(StackSource stackSource, int top, FileInfo? outputFile, GroupBy groupBy, bool sortByInclusive, CancellationToken cancellationToken)
     {
         var callTree = new CallTree(ScalingPolicyKind.TimeMetric);
         callTree.StackSource = stackSource;
@@ -294,16 +333,16 @@ public static class CpuStacksCommand
         var json = JsonSerializer.Serialize(result, options);
 
         if (outputFile != null)
-            File.WriteAllText(outputFile.FullName, json);
+            await File.WriteAllTextAsync(outputFile.FullName, json, cancellationToken).ConfigureAwait(false);
         else
             Console.WriteLine(json);
     }
 
-    private static void OutputSpeedscope(StackSource stackSource, FileInfo traceFile, FileInfo? outputFile)
+    private static async Task OutputSpeedscope(StackSource stackSource, FileInfo traceFile, FileInfo? outputFile, CancellationToken cancellationToken)
     {
         var outputPath = outputFile?.FullName ?? Path.ChangeExtension(traceFile.FullName, ".speedscope.json");
         
-        SpeedScopeStackSourceWriter.WriteStackViewAsJson(stackSource, outputPath);
+        await Task.Run(() => SpeedScopeStackSourceWriter.WriteStackViewAsJson(stackSource, outputPath), cancellationToken).ConfigureAwait(false);
         
         Console.Error.WriteLine($"SpeedScope file written to: {outputPath}");
         Console.Error.WriteLine("Open at: https://www.speedscope.app/");

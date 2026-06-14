@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using Microsoft.Diagnostics.Tracing.Analysis;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
@@ -9,9 +10,19 @@ public static class JitStatsCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var processOption = new Option<string?>("--process", "Filter by process name");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var processOption = new Option<string?>("--process")
+        {
+            Description = "Filter by process name"
+        };
 
         var command = new Command("jitstats", "Display JIT compilation statistics from a trace")
         {
@@ -20,11 +31,17 @@ public static class JitStatsCommand
             processOption
         };
 
-        command.SetHandler(Execute, traceFileArg, formatOption, processOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var processFilter = parseResult.GetValue(processOption)!;
+            await Execute(traceFile, format, processFilter, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? processFilter)
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? processFilter, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -34,7 +51,7 @@ public static class JitStatsCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             

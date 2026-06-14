@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using Microsoft.Diagnostics.Tracing.Etlx;
 using EtlxTraceLog = Microsoft.Diagnostics.Tracing.Etlx.TraceLog;
@@ -11,27 +12,61 @@ public static class AllocCommand
     {
         var command = new Command("alloc", "Analyze memory allocations by type");
 
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file");
-        var formatOption = new Option<string>("--format", () => "text", "Output format: text, json");
-        var topOption = new Option<int>("--top", () => 20, "Number of types to show");
-        var processOption = new Option<string?>("--process", "Filter by process name");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var groupByOption = new Option<string>("--group-by", () => "type", "Group by: type, namespace, module");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file"
+        };
+        var formatOption = new Option<string>("--format")
+        {
+            DefaultValueFactory = _ => "text",
+            Description = "Output format: text, json"
+        };
+        var topOption = new Option<int>("--top")
+        {
+            DefaultValueFactory = _ => 20,
+            Description = "Number of types to show"
+        };
+        var processOption = new Option<string?>("--process")
+        {
+            Description = "Filter by process name"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var groupByOption = new Option<string>("--group-by")
+        {
+            DefaultValueFactory = _ => "type",
+            Description = "Group by: type, namespace, module"
+        };
 
-        command.AddArgument(traceFileArg);
-        command.AddOption(formatOption);
-        command.AddOption(topOption);
-        command.AddOption(processOption);
-        command.AddOption(fromOption);
-        command.AddOption(toOption);
-        command.AddOption(groupByOption);
+        command.Arguments.Add(traceFileArg);
+        command.Options.Add(formatOption);
+        command.Options.Add(topOption);
+        command.Options.Add(processOption);
+        command.Options.Add(fromOption);
+        command.Options.Add(toOption);
+        command.Options.Add(groupByOption);
 
-        command.SetHandler(Execute, traceFileArg, formatOption, topOption, processOption, fromOption, toOption, groupByOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var top = parseResult.GetValue(topOption)!;
+            var processName = parseResult.GetValue(processOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var groupBy = parseResult.GetValue(groupByOption)!;
+            await Execute(traceFile, format, top, processName, fromMs, toMs, groupBy, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, string format, int top, string? processName, double? fromMs, double? toMs, string groupBy)
+    private static async Task Execute(FileInfo traceFile, string format, int top, string? processName, double? fromMs, double? toMs, string groupBy, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -41,7 +76,7 @@ public static class AllocCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new EtlxTraceLog(etlxPath);
             
             var allocations = new Dictionary<string, AllocationInfo>();

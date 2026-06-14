@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers.Clr;
@@ -10,12 +11,32 @@ public static class ExceptionsCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var typeOption = new Option<string?>("--type", "Filter by exception type (substring match)");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var limitOption = new Option<int>("--limit", () => 100, "Maximum number of exceptions to show");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var typeOption = new Option<string?>("--type")
+        {
+            Description = "Filter by exception type (substring match)"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var limitOption = new Option<int>("--limit")
+        {
+            DefaultValueFactory = _ => 100,
+            Description = "Maximum number of exceptions to show"
+        };
 
         var command = new Command("exceptions", "List exceptions thrown during the trace")
         {
@@ -27,12 +48,21 @@ public static class ExceptionsCommand
             limitOption
         };
 
-        command.SetHandler(Execute, traceFileArg, formatOption, typeOption, fromOption, toOption, limitOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var typeFilter = parseResult.GetValue(typeOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var limit = parseResult.GetValue(limitOption)!;
+            await Execute(traceFile, format, typeFilter, fromMs, toMs, limit, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? typeFilter,
-        double? fromMs, double? toMs, int limit)
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? typeFilter,
+        double? fromMs, double? toMs, int limit, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -42,7 +72,7 @@ public static class ExceptionsCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
 

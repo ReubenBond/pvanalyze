@@ -61,6 +61,55 @@ public static class EtlxCache
         }
     }
 
+    public static async Task<string> GetOrCreateEtlxAsync(string nettraceFilePath, CancellationToken cancellationToken = default)
+    {
+        string etlxPath = nettraceFilePath + CacheSuffix;
+        string lockPath = etlxPath + ".lock";
+
+        if (IsFreshCache(nettraceFilePath, etlxPath))
+            return etlxPath;
+
+        using var lockStream = await AcquireLockAsync(lockPath, cancellationToken).ConfigureAwait(false);
+        if (IsFreshCache(nettraceFilePath, etlxPath))
+            return etlxPath;
+
+        string tempPath = $"{etlxPath}.tmp.{Environment.ProcessId}.{Guid.NewGuid():N}";
+        try
+        {
+            await Task.Run(() => TraceLog.CreateFromEventPipeDataFile(nettraceFilePath, tempPath), cancellationToken).ConfigureAwait(false);
+            try
+            {
+                File.Move(tempPath, etlxPath, overwrite: true);
+                return etlxPath;
+            }
+            catch (IOException publishEx)
+            {
+                if (!IsFreshCache(nettraceFilePath, etlxPath))
+                    throw new IOException($"Failed to publish ETLX cache '{etlxPath}'.", publishEx);
+
+                // Another writer published a fresh cache first.
+                cancellationToken.ThrowIfCancellationRequested();
+                TryDeleteTemp(tempPath);
+                return etlxPath;
+            }
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                TryDeleteTemp(tempPath);
+            }
+            catch (Exception cleanupEx)
+            {
+                throw new IOException(
+                    $"Failed to clean temporary ETLX cache file '{tempPath}' after conversion failure.",
+                    new AggregateException(ex, cleanupEx));
+            }
+            throw;
+        }
+    }
+
     private static bool IsFreshCache(string nettraceFilePath, string etlxPath)
     {
         if (!File.Exists(etlxPath))
@@ -87,6 +136,26 @@ public static class EtlxCache
             catch (UnauthorizedAccessException) when (sw.Elapsed < LockTimeout)
             {
                 Thread.Sleep(LockRetryDelayMs);
+            }
+        }
+    }
+
+    private static async Task<FileStream> AcquireLockAsync(string lockPath, CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (sw.Elapsed < LockTimeout)
+            {
+                await Task.Delay(LockRetryDelayMs, cancellationToken).ConfigureAwait(false);
+            }
+            catch (UnauthorizedAccessException) when (sw.Elapsed < LockTimeout)
+            {
+                await Task.Delay(LockRetryDelayMs, cancellationToken).ConfigureAwait(false);
             }
         }
     }

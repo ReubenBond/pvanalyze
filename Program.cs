@@ -23,6 +23,6 @@ class Program
             CleanCommand.Create(),
         };
 
-        return await rootCommand.InvokeAsync(args);
+        return await rootCommand.Parse(args).InvokeAsync();
     }
 }

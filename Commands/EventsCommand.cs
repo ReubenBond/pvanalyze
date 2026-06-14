@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using Microsoft.Diagnostics.Tracing;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
@@ -9,17 +10,52 @@ public static class EventsCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var typeOption = new Option<string?>("--type", "Filter by event type name (substring match)");
-        var providerOption = new Option<string?>("--provider", "Filter by provider name (substring match)");
-        var listOption = new Option<bool>("--list", "List unique event types only");
-        var limitOption = new Option<int>("--limit", () => 100, "Maximum number of events to show");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var pidOption = new Option<int?>("--pid", "Filter by process ID");
-        var tidOption = new Option<int?>("--tid", "Filter by thread ID");
-        var payloadOption = new Option<string?>("--payload", "Filter by payload content (substring match)");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var typeOption = new Option<string?>("--type")
+        {
+            Description = "Filter by event type name (substring match)"
+        };
+        var providerOption = new Option<string?>("--provider")
+        {
+            Description = "Filter by provider name (substring match)"
+        };
+        var listOption = new Option<bool>("--list")
+        {
+            Description = "List unique event types only"
+        };
+        var limitOption = new Option<int>("--limit")
+        {
+            DefaultValueFactory = _ => 100,
+            Description = "Maximum number of events to show"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var pidOption = new Option<int?>("--pid")
+        {
+            Description = "Filter by process ID"
+        };
+        var tidOption = new Option<int?>("--tid")
+        {
+            Description = "Filter by thread ID"
+        };
+        var payloadOption = new Option<string?>("--payload")
+        {
+            Description = "Filter by payload content (substring match)"
+        };
 
         var command = new Command("events", "List and filter events from a trace")
         {
@@ -36,27 +72,27 @@ public static class EventsCommand
             payloadOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
         {
-            var traceFile = context.ParseResult.GetValueForArgument(traceFileArg);
-            var format = context.ParseResult.GetValueForOption(formatOption);
-            var typeFilter = context.ParseResult.GetValueForOption(typeOption);
-            var providerFilter = context.ParseResult.GetValueForOption(providerOption);
-            var listOnly = context.ParseResult.GetValueForOption(listOption);
-            var limit = context.ParseResult.GetValueForOption(limitOption);
-            var fromMs = context.ParseResult.GetValueForOption(fromOption);
-            var toMs = context.ParseResult.GetValueForOption(toOption);
-            var pid = context.ParseResult.GetValueForOption(pidOption);
-            var tid = context.ParseResult.GetValueForOption(tidOption);
-            var payload = context.ParseResult.GetValueForOption(payloadOption);
-            Execute(traceFile, format, typeFilter, providerFilter, listOnly, limit, fromMs, toMs, pid, tid, payload);
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var typeFilter = parseResult.GetValue(typeOption)!;
+            var providerFilter = parseResult.GetValue(providerOption)!;
+            var listOnly = parseResult.GetValue(listOption)!;
+            var limit = parseResult.GetValue(limitOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var pid = parseResult.GetValue(pidOption)!;
+            var tid = parseResult.GetValue(tidOption)!;
+            var payload = parseResult.GetValue(payloadOption)!;
+            await Execute(traceFile, format, typeFilter, providerFilter, listOnly, limit, fromMs, toMs, pid, tid, payload, cancellationToken).ConfigureAwait(false);
         });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? typeFilter, 
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? typeFilter, 
         string? providerFilter, bool listOnly, int limit, double? fromMs, double? toMs,
-        int? pidFilter, int? tidFilter, string? payloadFilter)
+        int? pidFilter, int? tidFilter, string? payloadFilter, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -66,7 +102,7 @@ public static class EventsCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
 

@@ -1,4 +1,5 @@
 using System.CommandLine;
+using System.CommandLine.Parsing;
 using System.Text.Json;
 using Microsoft.Diagnostics.Tracing.Analysis;
 using Microsoft.Diagnostics.Tracing.Analysis.GC;
@@ -10,13 +11,35 @@ public static class GcStatsCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var processOption = new Option<string?>("--process", "Filter by process name");
-        var timelineOption = new Option<bool>("--timeline", "Show per-GC timeline");
-        var longestOption = new Option<int?>("--longest", "Show N longest GC pauses");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var processOption = new Option<string?>("--process")
+        {
+            Description = "Filter by process name"
+        };
+        var timelineOption = new Option<bool>("--timeline")
+        {
+            Description = "Show per-GC timeline"
+        };
+        var longestOption = new Option<int?>("--longest")
+        {
+            Description = "Show N longest GC pauses"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
 
         var command = new Command("gcstats", "Display GC statistics from a trace")
         {
@@ -29,12 +52,22 @@ public static class GcStatsCommand
             toOption
         };
 
-        command.SetHandler(Execute, traceFileArg, formatOption, processOption, timelineOption, longestOption, fromOption, toOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var processFilter = parseResult.GetValue(processOption)!;
+            var timeline = parseResult.GetValue(timelineOption)!;
+            var longest = parseResult.GetValue(longestOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            await Execute(traceFile, format, processFilter, timeline, longest, fromMs, toMs, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? processFilter,
-        bool timeline, int? longest, double? fromMs, double? toMs)
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? processFilter,
+        bool timeline, int? longest, double? fromMs, double? toMs, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -44,7 +77,7 @@ public static class GcStatsCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
