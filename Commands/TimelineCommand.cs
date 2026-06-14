@@ -15,7 +15,6 @@ namespace PVAnalyze.Commands;
 [JsonSerializable(typeof(AllocBucket))]
 [JsonSerializable(typeof(JitBucket))]
 [JsonSerializable(typeof(EventBucket))]
-[JsonSerializable(typeof(object[]))]
 internal partial class TimelineJsonContext : JsonSerializerContext { }
 
 public static class TimelineCommand
