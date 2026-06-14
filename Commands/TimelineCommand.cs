@@ -1,10 +1,22 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 using PVAnalyze;
 
 namespace PVAnalyze.Commands;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(TimelineResponse))]
+[JsonSerializable(typeof(Dictionary<string, object[]>))]
+[JsonSerializable(typeof(GcBucket))]
+[JsonSerializable(typeof(CpuBucket))]
+[JsonSerializable(typeof(ExceptionBucket))]
+[JsonSerializable(typeof(AllocBucket))]
+[JsonSerializable(typeof(JitBucket))]
+[JsonSerializable(typeof(EventBucket))]
+[JsonSerializable(typeof(object[]))]
+internal partial class TimelineJsonContext : JsonSerializerContext { }
 
 public static class TimelineCommand
 {
@@ -78,12 +90,7 @@ public static class TimelineCommand
 
             if (format == OutputFormat.Json)
             {
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
-                Console.WriteLine(JsonSerializer.Serialize(result, options));
+                await JsonOutput.WriteAsync(result, TimelineJsonContext.Default.TimelineResponse, cancellationToken).ConfigureAwait(false);
             }
             else
             {

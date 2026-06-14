@@ -1,11 +1,16 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing;
 using Microsoft.Diagnostics.Tracing.Parsers.Clr;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(ExceptionsResponse))]
+[JsonSerializable(typeof(Dictionary<string, int>))]
+internal partial class ExceptionsJsonContext : JsonSerializerContext { }
 
 public static class ExceptionsCommand
 {
@@ -76,7 +81,7 @@ public static class ExceptionsCommand
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
-            var exceptions = new List<ExceptionInfo>();
+            var exceptions = new List<ExceptionEntry>();
             var exceptionCounts = new Dictionary<string, int>();
 
             // Look for exception events
@@ -108,14 +113,12 @@ public static class ExceptionsCommand
 
                     if (exceptions.Count < limit)
                     {
-                        exceptions.Add(new ExceptionInfo
-                        {
-                            TimestampMs = Math.Round(evt.TimeStampRelativeMSec, 3),
-                            Type = exType,
-                            Message = exMessage,
-                            ProcessId = evt.ProcessID,
-                            ThreadId = evt.ThreadID
-                        });
+                        exceptions.Add(new ExceptionEntry(
+                            Math.Round(evt.TimeStampRelativeMSec, 3),
+                            exType,
+                            exMessage,
+                            evt.ProcessID,
+                            evt.ThreadID));
                     }
                 }
             }
@@ -129,14 +132,10 @@ public static class ExceptionsCommand
 
             if (format == OutputFormat.Json)
             {
-                var result = new
-                {
-                    summary = exceptionCounts.OrderByDescending(kvp => kvp.Value)
-                        .Select(kvp => new { type = kvp.Key, count = kvp.Value }),
-                    exceptions = exceptions
-                };
-                var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-                Console.WriteLine(JsonSerializer.Serialize(result, options));
+                var result = new ExceptionsResponse(
+                    exceptions,
+                    exceptionCounts.ToDictionary(k => k.Key, k => k.Value));
+                await JsonOutput.WriteAsync(result, ExceptionsJsonContext.Default.ExceptionsResponse, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -212,14 +211,5 @@ public static class ExceptionsCommand
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
-    }
-
-    private class ExceptionInfo
-    {
-        public double TimestampMs { get; set; }
-        public string Type { get; set; } = "";
-        public string Message { get; set; } = "";
-        public int ProcessId { get; set; }
-        public int ThreadId { get; set; }
     }
 }

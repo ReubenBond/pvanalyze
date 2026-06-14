@@ -1,10 +1,32 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
+
+internal class EventTypeInfo
+{
+    public string Provider { get; set; } = "";
+    public string EventName { get; set; } = "";
+    public int Count { get; set; }
+}
+
+internal class EventInfo
+{
+    public double TimestampMs { get; set; }
+    public string Provider { get; set; } = "";
+    public string EventName { get; set; } = "";
+    public int ProcessId { get; set; }
+    public int ThreadId { get; set; }
+    public string Message { get; set; } = "";
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<EventTypeInfo>))]
+[JsonSerializable(typeof(List<EventInfo>))]
+internal partial class EventsJsonContext : JsonSerializerContext { }
 
 public static class EventsCommand
 {
@@ -108,12 +130,12 @@ public static class EventsCommand
 
             if (listOnly)
             {
-                ListEventTypes(traceLog, format, providerFilter, fromMs, toMs, cancellationToken);
+                await ListEventTypes(traceLog, format, providerFilter, fromMs, toMs, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                ListEvents(traceLog, format, typeFilter, providerFilter, limit, fromMs, toMs,
-                    pidFilter, tidFilter, payloadFilter, cancellationToken);
+                await ListEvents(traceLog, format, typeFilter, providerFilter, limit, fromMs, toMs,
+                    pidFilter, tidFilter, payloadFilter, cancellationToken).ConfigureAwait(false);
             }
 
         }
@@ -127,7 +149,7 @@ public static class EventsCommand
         }
     }
 
-    private static void ListEventTypes(Etlx.TraceLog traceLog, OutputFormat format, 
+    private static async Task ListEventTypes(Etlx.TraceLog traceLog, OutputFormat format, 
         string? providerFilter, double? fromMs, double? toMs, CancellationToken cancellationToken)
     {
         var eventTypes = new Dictionary<string, EventTypeInfo>();
@@ -163,8 +185,7 @@ public static class EventsCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(sorted, options));
+            await JsonOutput.WriteAsync(sorted, EventsJsonContext.Default.ListEventTypeInfo, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -179,7 +200,7 @@ public static class EventsCommand
         }
     }
 
-    private static void ListEvents(Etlx.TraceLog traceLog, OutputFormat format, 
+    private static async Task ListEvents(Etlx.TraceLog traceLog, OutputFormat format, 
         string? typeFilter, string? providerFilter, int limit, double? fromMs, double? toMs,
         int? pidFilter, int? tidFilter, string? payloadFilter, CancellationToken cancellationToken)
     {
@@ -231,8 +252,7 @@ public static class EventsCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(events, options));
+            await JsonOutput.WriteAsync(events, EventsJsonContext.Default.ListEventInfo, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -281,22 +301,5 @@ public static class EventsCommand
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
-    }
-
-    private class EventTypeInfo
-    {
-        public string Provider { get; set; } = "";
-        public string EventName { get; set; } = "";
-        public int Count { get; set; }
-    }
-
-    private class EventInfo
-    {
-        public double TimestampMs { get; set; }
-        public string Provider { get; set; } = "";
-        public string EventName { get; set; } = "";
-        public int ProcessId { get; set; }
-        public int ThreadId { get; set; }
-        public string Message { get; set; } = "";
     }
 }

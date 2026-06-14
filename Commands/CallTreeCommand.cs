@@ -1,11 +1,16 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Stacks;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 using PVAnalyze;
 
 namespace PVAnalyze.Commands;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(CallTreeResponse))]
+[JsonSerializable(typeof(CallerCalleeResponse))]
+internal partial class CallTreeJsonContext : JsonSerializerContext { }
 
 public static class CallTreeCommand
 {
@@ -111,15 +116,15 @@ public static class CallTreeCommand
 
             if (!string.IsNullOrEmpty(callerCallee))
             {
-                OutputCallerCallee(callTree, callerCallee!, format);
+                await OutputCallerCallee(callTree, callerCallee!, format, cancellationToken).ConfigureAwait(false);
             }
             else if (hotPath)
             {
-                OutputHotPath(callTree, format);
+                await OutputHotPath(callTree, format, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                OutputCallTree(callTree, depth, format, minPercent);
+                await OutputCallTree(callTree, depth, format, minPercent, cancellationToken).ConfigureAwait(false);
             }
 
         }
@@ -133,7 +138,7 @@ public static class CallTreeCommand
         }
     }
 
-    private static void OutputCallTree(CallTree callTree, int maxDepth, OutputFormat format, double minPercent)
+    private static async Task OutputCallTree(CallTree callTree, int maxDepth, OutputFormat format, double minPercent, CancellationToken cancellationToken)
     {
         var result = TraceAnalyzer.GetCallTree(callTree, maxDepth);
         var unfilteredCount = CountNodes(result.Nodes);
@@ -145,8 +150,7 @@ public static class CallTreeCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(result, options));
+            await JsonOutput.WriteAsync(result, CallTreeJsonContext.Default.CallTreeResponse, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -175,15 +179,14 @@ public static class CallTreeCommand
         }
     }
 
-    private static void OutputHotPath(CallTree callTree, OutputFormat format)
+    private static async Task OutputHotPath(CallTree callTree, OutputFormat format, CancellationToken cancellationToken)
     {
         // Start from root (path = [0] = first real child)
         var result = TraceAnalyzer.GetHotPath(callTree, new[] { 0 });
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(result, options));
+            await JsonOutput.WriteAsync(result, CallTreeJsonContext.Default.CallTreeResponse, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -211,14 +214,13 @@ public static class CallTreeCommand
         }
     }
 
-    private static void OutputCallerCallee(CallTree callTree, string method, OutputFormat format)
+    private static async Task OutputCallerCallee(CallTree callTree, string method, OutputFormat format, CancellationToken cancellationToken)
     {
         var result = TraceAnalyzer.GetCallerCallee(callTree, method);
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(result, options));
+            await JsonOutput.WriteAsync(result, CallTreeJsonContext.Default.CallerCalleeResponse, cancellationToken).ConfigureAwait(false);
         }
         else
         {

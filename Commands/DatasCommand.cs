@@ -1,9 +1,13 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<DatasResponse>))]
+internal partial class DatasJsonContext : JsonSerializerContext { }
 
 public static class DatasCommand
 {
@@ -90,12 +94,7 @@ public static class DatasCommand
             if (format == OutputFormat.Json)
             {
                 var output = changesOnly ? FilterToChangesOnly(results) : results;
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
-                Console.WriteLine(JsonSerializer.Serialize(output, options));
+                await JsonOutput.WriteAsync(output, DatasJsonContext.Default.ListDatasResponse, cancellationToken).ConfigureAwait(false);
                 return;
             }
 

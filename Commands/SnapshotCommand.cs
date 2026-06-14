@@ -1,10 +1,14 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 using PVAnalyze;
 
 namespace PVAnalyze.Commands;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(SnapshotResponse))]
+internal partial class SnapshotJsonContext : JsonSerializerContext { }
 
 public static class SnapshotCommand
 {
@@ -63,12 +67,7 @@ public static class SnapshotCommand
 
             if (format == OutputFormat.Json)
             {
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
-                Console.WriteLine(JsonSerializer.Serialize(result, options));
+                await JsonOutput.WriteAsync(result, SnapshotJsonContext.Default.SnapshotResponse, cancellationToken).ConfigureAwait(false);
             }
             else
             {

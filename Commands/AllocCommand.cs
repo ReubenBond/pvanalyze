@@ -1,10 +1,23 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Etlx;
 using EtlxTraceLog = Microsoft.Diagnostics.Tracing.Etlx.TraceLog;
 
 namespace PVAnalyze.Commands;
+
+internal class AllocationInfo
+{
+    public string Name { get; set; } = "";
+    public long Count { get; set; }
+    public long TotalBytes { get; set; }
+    public long LargeObjectCount { get; set; }
+    public long LargeObjectBytes { get; set; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(AllocationsResponse))]
+internal partial class AllocJsonContext : JsonSerializerContext { }
 
 public static class AllocCommand
 {
@@ -179,7 +192,7 @@ public static class AllocCommand
 
             if (format == "json")
             {
-                OutputJson(allocations, totalBytes, totalCount, top, groupBy);
+                await OutputJson(allocations, totalBytes, totalCount, top, groupBy, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -257,32 +270,27 @@ public static class AllocCommand
         }
     }
 
-    private static void OutputJson(Dictionary<string, AllocationInfo> allocations,
-        long totalBytes, long totalCount, int top, string groupBy)
+    private static async Task OutputJson(Dictionary<string, AllocationInfo> allocations,
+        long totalBytes, long totalCount, int top, string groupBy, CancellationToken cancellationToken)
     {
         var sorted = allocations.Values
             .OrderByDescending(a => a.TotalBytes)
             .Take(top)
             .ToList();
 
-        var output = new
-        {
-            totalAllocations = totalCount,
-            totalBytes = totalBytes,
-            groupBy = groupBy,
-            allocations = sorted.Select(a => new
-            {
-                name = a.Name,
-                count = a.Count,
-                totalBytes = a.TotalBytes,
-                averageBytes = a.Count > 0 ? a.TotalBytes / a.Count : 0,
-                largeObjectCount = a.LargeObjectCount,
-                largeObjectBytes = a.LargeObjectBytes
-            }).ToList()
-        };
+        var response = new AllocationsResponse(
+            totalCount,
+            totalBytes,
+            groupBy,
+            sorted.Select(a => new AllocationEntry(
+                a.Name,
+                a.Count,
+                a.TotalBytes,
+                a.Count > 0 ? a.TotalBytes / (double)a.Count : 0,
+                a.LargeObjectCount,
+                a.LargeObjectBytes)).ToList());
 
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        Console.WriteLine(JsonSerializer.Serialize(output, options));
+        await JsonOutput.WriteAsync(response, AllocJsonContext.Default.AllocationsResponse, cancellationToken).ConfigureAwait(false);
     }
 
     private static string FormatBytes(long bytes)
@@ -300,14 +308,5 @@ public static class AllocCommand
     {
         if (name.Length <= maxLen) return name;
         return "..." + name.Substring(name.Length - maxLen + 3);
-    }
-
-    private class AllocationInfo
-    {
-        public string Name { get; set; } = "";
-        public long Count { get; set; }
-        public long TotalBytes { get; set; }
-        public long LargeObjectCount { get; set; }
-        public long LargeObjectBytes { get; set; }
     }
 }

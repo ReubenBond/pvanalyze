@@ -1,12 +1,16 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Microsoft.Diagnostics.Tracing.Stacks;
 using Microsoft.Diagnostics.Tracing.Stacks.Formats;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(CpuStacksResponse))]
+internal partial class CpuStacksJsonContext : JsonSerializerContext { }
 
 public enum GroupBy
 {
@@ -311,35 +315,30 @@ public static class CpuStacksCommand
         CollectMethods(callTree.Root, methods);
 
         var grouped = GroupMethods(methods, groupBy);
-        
+
         var sorted = sortByInclusive
             ? grouped.OrderByDescending(m => m.Inclusive).Take(top).ToList()
             : grouped.OrderByDescending(m => m.Exclusive).Take(top).ToList();
 
         var totalTime = callTree.Root.InclusiveMetric;
-        var topItems = sorted.Select(m => new 
-        { 
-            name = m.Name, 
-            exclusiveMs = Math.Round(m.Exclusive, 2), 
-            inclusiveMs = Math.Round(m.Inclusive, 2),
-            exclusivePercent = Math.Round(totalTime > 0 ? (m.Exclusive / totalTime) * 100 : 0, 2)
-        }).ToList();
+        var items = sorted.Select(m => new CpuStackEntry(
+            m.Name,
+            Math.Round((double)m.Exclusive, 2),
+            Math.Round((double)m.Inclusive, 2),
+            Math.Round(totalTime > 0 ? (double)(m.Exclusive / totalTime) * 100 : 0, 2))).ToList();
 
-        var result = new
-        {
-            totalSamples = callTree.Root.InclusiveCount,
-            totalCpuTimeMs = Math.Round(callTree.Root.InclusiveMetric, 2),
-            groupedBy = groupBy.ToString().ToLower(),
-            items = topItems
-        };
-
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        var json = JsonSerializer.Serialize(result, options);
+        var result = new CpuStacksResponse(
+            (int)callTree.Root.InclusiveCount,
+            Math.Round((double)callTree.Root.InclusiveMetric, 2),
+            groupBy.ToString().ToLower(),
+            items,
+            0,
+            0);
 
         if (outputFile != null)
-            await File.WriteAllTextAsync(outputFile.FullName, json, cancellationToken).ConfigureAwait(false);
+            await JsonOutput.WriteToFileAsync(result, outputFile.FullName, CpuStacksJsonContext.Default.CpuStacksResponse, cancellationToken).ConfigureAwait(false);
         else
-            Console.WriteLine(json);
+            await JsonOutput.WriteAsync(result, CpuStacksJsonContext.Default.CpuStacksResponse, cancellationToken).ConfigureAwait(false);
     }
 
     private static async Task OutputSpeedscope(StackSource stackSource, FileInfo traceFile, FileInfo? outputFile, CancellationToken cancellationToken)

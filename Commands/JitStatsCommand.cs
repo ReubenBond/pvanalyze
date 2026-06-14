@@ -1,10 +1,28 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Analysis;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
+
+internal class JitProcessStats
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public long TotalMethodsJitted { get; set; }
+    public double TotalJitCpuTimeMSec { get; set; }
+    public long TotalILSize { get; set; }
+    public long TotalNativeSize { get; set; }
+    public long ForegroundCount { get; set; }
+    public long BackgroundCount { get; set; }
+    public int InliningSuccesses { get; set; }
+    public int InliningFailures { get; set; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<JitProcessStats>))]
+internal partial class JitStatsJsonContext : JsonSerializerContext { }
 
 public static class JitStatsCommand
 {
@@ -105,7 +123,7 @@ public static class JitStatsCommand
             switch (format)
             {
                 case OutputFormat.Json:
-                    OutputJson(processes);
+                    await OutputJson(processes, cancellationToken).ConfigureAwait(false);
                     break;
                 case OutputFormat.Text:
                 default:
@@ -145,27 +163,14 @@ public static class JitStatsCommand
         }
     }
 
-    private static void OutputJson(List<JitProcessStats> processes)
+    private static async Task OutputJson(List<JitProcessStats> processes, CancellationToken cancellationToken)
     {
-        var options = new JsonSerializerOptions 
-        { 
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-        Console.WriteLine(JsonSerializer.Serialize(processes, options));
+        await JsonOutput.WriteAsync(processes, JitStatsJsonContext.Default.ListJitProcessStats, cancellationToken).ConfigureAwait(false);
     }
 
-    private class JitProcessStats
+    private static string Truncate(string s, int maxLen)
     {
-        public int ProcessId { get; set; }
-        public string ProcessName { get; set; } = "";
-        public long TotalMethodsJitted { get; set; }
-        public double TotalJitCpuTimeMSec { get; set; }
-        public long TotalILSize { get; set; }
-        public long TotalNativeSize { get; set; }
-        public long ForegroundCount { get; set; }
-        public long BackgroundCount { get; set; }
-        public int InliningSuccesses { get; set; }
-        public int InliningFailures { get; set; }
+        if (string.IsNullOrEmpty(s)) return "";
+        return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
     }
 }

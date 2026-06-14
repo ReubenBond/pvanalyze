@@ -1,11 +1,47 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Analysis;
 using Microsoft.Diagnostics.Tracing.Analysis.GC;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
+
+internal class GcProcessStats
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public int TotalGCs { get; set; }
+    public double TotalAllocatedMB { get; set; }
+    public double TotalGcCpuMSec { get; set; }
+    public double TotalPauseTimeMSec { get; set; }
+    public double MaxHeapSizeMB { get; set; }
+    public double PauseTimePercent { get; set; }
+    public int Gen0Count { get; set; }
+    public int Gen1Count { get; set; }
+    public int Gen2Count { get; set; }
+    public int HeapCount { get; set; }
+}
+
+internal class GcEventInfo
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public int GcNumber { get; set; }
+    public int Generation { get; set; }
+    public string Type { get; set; } = "";
+    public string Reason { get; set; } = "";
+    public double StartTimeMs { get; set; }
+    public double PauseDurationMs { get; set; }
+    public double HeapSizeBeforeMB { get; set; }
+    public double HeapSizeAfterMB { get; set; }
+    public double PromotedMB { get; set; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<GcProcessStats>))]
+[JsonSerializable(typeof(List<GcEventInfo>))]
+internal partial class GcStatsJsonContext : JsonSerializerContext { }
 
 public static class GcStatsCommand
 {
@@ -169,11 +205,11 @@ public static class GcStatsCommand
             // Determine output mode
             if (timeline || longest.HasValue)
             {
-                OutputTimeline(allGcEvents, format, longest);
+                await OutputTimeline(allGcEvents, format, longest, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                OutputSummary(processStats, format);
+                await OutputSummary(processStats, format, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException)
@@ -186,18 +222,13 @@ public static class GcStatsCommand
         }
     }
 
-    private static void OutputSummary(List<GcProcessStats> processes, OutputFormat format)
+    private static async Task OutputSummary(List<GcProcessStats> processes, OutputFormat format, CancellationToken cancellationToken)
     {
         processes = processes.OrderByDescending(p => p.TotalPauseTimeMSec).ToList();
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions 
-            { 
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-            Console.WriteLine(JsonSerializer.Serialize(processes, options));
+            await JsonOutput.WriteAsync(processes, GcStatsJsonContext.Default.ListGcProcessStats, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -222,7 +253,7 @@ public static class GcStatsCommand
         }
     }
 
-    private static void OutputTimeline(List<GcEventInfo> gcEvents, OutputFormat format, int? longest)
+    private static async Task OutputTimeline(List<GcEventInfo> gcEvents, OutputFormat format, int? longest, CancellationToken cancellationToken)
     {
         // Sort by pause duration if showing longest, otherwise by time
         var events = longest.HasValue
@@ -231,12 +262,7 @@ public static class GcStatsCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions 
-            { 
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-            Console.WriteLine(JsonSerializer.Serialize(events, options));
+            await JsonOutput.WriteAsync(events, GcStatsJsonContext.Default.ListGcEventInfo, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -259,37 +285,6 @@ public static class GcStatsCommand
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
-    }
-
-    private class GcProcessStats
-    {
-        public int ProcessId { get; set; }
-        public string ProcessName { get; set; } = "";
-        public int TotalGCs { get; set; }
-        public double TotalAllocatedMB { get; set; }
-        public double TotalGcCpuMSec { get; set; }
-        public double TotalPauseTimeMSec { get; set; }
-        public double MaxHeapSizeMB { get; set; }
-        public double PauseTimePercent { get; set; }
-        public int Gen0Count { get; set; }
-        public int Gen1Count { get; set; }
-        public int Gen2Count { get; set; }
-        public int HeapCount { get; set; }
-    }
-
-    private class GcEventInfo
-    {
-        public int ProcessId { get; set; }
-        public string ProcessName { get; set; } = "";
-        public int GcNumber { get; set; }
-        public int Generation { get; set; }
-        public string Type { get; set; } = "";
-        public string Reason { get; set; } = "";
-        public double StartTimeMs { get; set; }
-        public double PauseDurationMs { get; set; }
-        public double HeapSizeBeforeMB { get; set; }
-        public double HeapSizeAfterMB { get; set; }
-        public double PromotedMB { get; set; }
     }
 }
 
