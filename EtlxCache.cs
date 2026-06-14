@@ -22,7 +22,7 @@ public static class EtlxCache
         if (IsFreshCache(nettraceFilePath, etlxPath))
             return etlxPath;
 
-        using var lockStream = await AcquireLockAsync(lockPath, cancellationToken).ConfigureAwait(false);
+        await using var lockStream = await AcquireLockAsync(lockPath, cancellationToken).ConfigureAwait(false);
         if (IsFreshCache(nettraceFilePath, etlxPath))
             return etlxPath;
 
