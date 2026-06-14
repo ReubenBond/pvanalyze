@@ -4,4 +4,7 @@ obj/
 *.user
 *.nupkg
 nupkg/
+*.pvanalyze.etlx
+*.pvanalyze.etlx.lock
+*.pvanalyze.etlx.tmp*
 

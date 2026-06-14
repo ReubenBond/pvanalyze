@@ -8,7 +8,6 @@ namespace PVAnalyze.Commands;
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
 [JsonSerializable(typeof(TimelineResponse))]
-[JsonSerializable(typeof(Dictionary<string, object[]>))]
 [JsonSerializable(typeof(GcBucket))]
 [JsonSerializable(typeof(CpuBucket))]
 [JsonSerializable(typeof(ExceptionBucket))]
