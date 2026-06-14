@@ -82,6 +82,8 @@ public static class ExceptionsCommand
             // Look for exception events
             foreach (var evt in traceLog.Events)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 // Time filtering
                 if (fromMs.HasValue && evt.TimeStampRelativeMSec < fromMs.Value) continue;
                 if (toMs.HasValue && evt.TimeStampRelativeMSec > toMs.Value) continue;
@@ -156,6 +158,10 @@ public static class ExceptionsCommand
                 }
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

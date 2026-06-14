@@ -176,6 +176,10 @@ public static class GcStatsCommand
                 OutputSummary(processStats, format);
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error analyzing trace: {ex.Message}");

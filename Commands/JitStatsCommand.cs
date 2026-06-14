@@ -114,6 +114,10 @@ public static class JitStatsCommand
             }
 
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error analyzing trace: {ex.Message}");

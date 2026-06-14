@@ -57,12 +57,18 @@ public static class InfoCommand
             Console.WriteLine("=== Processes ===");
             foreach (var process in traceLog.Processes.OrderByDescending(p => p.CPUMSec))
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 if (process.CPUMSec > 0 || process.Name != "Unknown")
                 {
                     Console.WriteLine($"  PID {process.ProcessID,6}: {process.Name,-30} CPU: {process.CPUMSec:F1} ms");
                 }
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

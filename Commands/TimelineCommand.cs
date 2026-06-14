@@ -91,10 +91,16 @@ public static class TimelineCommand
                 Console.WriteLine();
                 foreach (var (laneName, bucketArray) in result.Lanes)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     Console.WriteLine($"  Lane: {laneName} ({bucketArray.Length} buckets)");
                 }
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

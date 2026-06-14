@@ -104,6 +104,8 @@ public static class DatasCommand
 
             foreach (var proc in results)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 Console.WriteLine($"=== DATAS Stats for {proc.ProcessName} (PID {proc.ProcessId}) ===");
                 Console.WriteLine();
 
@@ -137,6 +139,10 @@ public static class DatasCommand
                     OutputGen2Tuning(proc, changesOnly);
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

@@ -133,6 +133,10 @@ public static class CpuStacksCommand
             }
 
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"Error analyzing trace: {ex.Message}");

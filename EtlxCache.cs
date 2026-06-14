@@ -46,11 +46,14 @@ public static class EtlxCache
                 return etlxPath;
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             try
             {
-                cancellationToken.ThrowIfCancellationRequested();
                 TryDeleteTemp(tempPath);
             }
             catch (Exception cleanupEx)

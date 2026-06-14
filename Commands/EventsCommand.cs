@@ -108,14 +108,18 @@ public static class EventsCommand
 
             if (listOnly)
             {
-                ListEventTypes(traceLog, format, providerFilter, fromMs, toMs);
+                ListEventTypes(traceLog, format, providerFilter, fromMs, toMs, cancellationToken);
             }
             else
             {
                 ListEvents(traceLog, format, typeFilter, providerFilter, limit, fromMs, toMs,
-                    pidFilter, tidFilter, payloadFilter);
+                    pidFilter, tidFilter, payloadFilter, cancellationToken);
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -124,12 +128,14 @@ public static class EventsCommand
     }
 
     private static void ListEventTypes(Etlx.TraceLog traceLog, OutputFormat format, 
-        string? providerFilter, double? fromMs, double? toMs)
+        string? providerFilter, double? fromMs, double? toMs, CancellationToken cancellationToken)
     {
         var eventTypes = new Dictionary<string, EventTypeInfo>();
 
         foreach (var evt in traceLog.Events)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Time filtering
             if (fromMs.HasValue && evt.TimeStampRelativeMSec < fromMs.Value) continue;
             if (toMs.HasValue && evt.TimeStampRelativeMSec > toMs.Value) continue;
@@ -175,13 +181,15 @@ public static class EventsCommand
 
     private static void ListEvents(Etlx.TraceLog traceLog, OutputFormat format, 
         string? typeFilter, string? providerFilter, int limit, double? fromMs, double? toMs,
-        int? pidFilter, int? tidFilter, string? payloadFilter)
+        int? pidFilter, int? tidFilter, string? payloadFilter, CancellationToken cancellationToken)
     {
         var events = new List<EventInfo>();
         int count = 0;
 
         foreach (var evt in traceLog.Events)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Time filtering
             if (fromMs.HasValue && evt.TimeStampRelativeMSec < fromMs.Value) continue;
             if (toMs.HasValue && evt.TimeStampRelativeMSec > toMs.Value) continue;

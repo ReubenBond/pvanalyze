@@ -69,12 +69,18 @@ public static class CleanCommand
 
         foreach (var file in etlxFiles)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             try
             {
                 var size = new FileInfo(file).Length;
                 File.Delete(file);
                 totalBytes += size;
                 deleted++;
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

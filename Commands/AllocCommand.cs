@@ -85,6 +85,8 @@ public static class AllocCommand
 
             foreach (var evt in traceLog.Events)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 // Look for allocation events (AllocationTick has type info, SampledObjectAllocation is higher frequency)
                 if (evt.EventName != "GC/AllocationTick" && evt.EventName != "GC/SampledObjectAllocation") continue;
 
@@ -183,6 +185,10 @@ public static class AllocCommand
             {
                 OutputText(allocations, totalBytes, totalCount, top, groupBy);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
