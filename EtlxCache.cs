@@ -29,6 +29,10 @@ public static class EtlxCache
         string tempPath = $"{etlxPath}.tmp.{Environment.ProcessId}.{Guid.NewGuid():N}";
         try
         {
+            // CreateFromEventPipeDataFile doesn't accept a cancellation token, so once it starts
+            // it runs to completion. Check before we begin so a late cancel still bails out cheaply;
+            // the Task.Run token only covers the queued-but-not-started window.
+            cancellationToken.ThrowIfCancellationRequested();
             await Task.Run(() => TraceLog.CreateFromEventPipeDataFile(nettraceFilePath, tempPath), cancellationToken).ConfigureAwait(false);
             try
             {
@@ -40,8 +44,8 @@ public static class EtlxCache
                 if (!IsFreshCache(nettraceFilePath, etlxPath))
                     throw new IOException($"Failed to publish ETLX cache '{etlxPath}'.", publishEx);
 
-                // Another writer published a fresh cache first.
-                cancellationToken.ThrowIfCancellationRequested();
+                // Another writer published a fresh cache first. We've already succeeded, so clean
+                // up our temp file and use the published cache rather than leaking it on cancel.
                 TryDeleteTemp(tempPath);
                 return etlxPath;
             }

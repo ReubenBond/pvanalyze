@@ -345,6 +345,9 @@ public static class CpuStacksCommand
     {
         var outputPath = outputFile?.FullName ?? Path.ChangeExtension(traceFile.FullName, ".speedscope.json");
         
+        // WriteStackViewAsJson doesn't accept a cancellation token, so once it starts it runs to
+        // completion. Check before we begin so a late cancel still bails out cheaply.
+        cancellationToken.ThrowIfCancellationRequested();
         await Task.Run(() => SpeedScopeStackSourceWriter.WriteStackViewAsJson(stackSource, outputPath), cancellationToken).ConfigureAwait(false);
         
         Console.Error.WriteLine($"SpeedScope file written to: {outputPath}");
