@@ -14,7 +14,7 @@ public static class EtlxCache
     private static readonly TimeSpan LockTimeout = TimeSpan.FromSeconds(30);
     private const int LockRetryDelayMs = 50;
 
-    public static string GetOrCreateEtlx(string nettraceFilePath)
+    public static async Task<string> GetOrCreateEtlxAsync(string nettraceFilePath, CancellationToken cancellationToken = default)
     {
         string etlxPath = nettraceFilePath + CacheSuffix;
         string lockPath = etlxPath + ".lock";
@@ -22,14 +22,18 @@ public static class EtlxCache
         if (IsFreshCache(nettraceFilePath, etlxPath))
             return etlxPath;
 
-        using var lockStream = AcquireLock(lockPath);
+        await using var lockStream = await AcquireLockAsync(lockPath, cancellationToken).ConfigureAwait(false);
         if (IsFreshCache(nettraceFilePath, etlxPath))
             return etlxPath;
 
         string tempPath = $"{etlxPath}.tmp.{Environment.ProcessId}.{Guid.NewGuid():N}";
         try
         {
-            TraceLog.CreateFromEventPipeDataFile(nettraceFilePath, tempPath);
+            // CreateFromEventPipeDataFile doesn't accept a cancellation token, so once it starts
+            // it runs to completion. Check before we begin so a late cancel still bails out cheaply;
+            // the Task.Run token only covers the queued-but-not-started window.
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Run(() => TraceLog.CreateFromEventPipeDataFile(nettraceFilePath, tempPath), cancellationToken).ConfigureAwait(false);
             try
             {
                 File.Move(tempPath, etlxPath, overwrite: true);
@@ -40,10 +44,15 @@ public static class EtlxCache
                 if (!IsFreshCache(nettraceFilePath, etlxPath))
                     throw new IOException($"Failed to publish ETLX cache '{etlxPath}'.", publishEx);
 
-                // Another writer published a fresh cache first.
+                // Another writer published a fresh cache first. We've already succeeded, so clean
+                // up our temp file and use the published cache rather than leaking it on cancel.
                 TryDeleteTemp(tempPath);
                 return etlxPath;
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -71,7 +80,7 @@ public static class EtlxCache
         return etlxTime >= nettraceTime;
     }
 
-    private static FileStream AcquireLock(string lockPath)
+    private static async Task<FileStream> AcquireLockAsync(string lockPath, CancellationToken cancellationToken)
     {
         var sw = Stopwatch.StartNew();
         while (true)
@@ -82,11 +91,11 @@ public static class EtlxCache
             }
             catch (IOException) when (sw.Elapsed < LockTimeout)
             {
-                Thread.Sleep(LockRetryDelayMs);
+                await Task.Delay(LockRetryDelayMs, cancellationToken).ConfigureAwait(false);
             }
             catch (UnauthorizedAccessException) when (sw.Elapsed < LockTimeout)
             {
-                Thread.Sleep(LockRetryDelayMs);
+                await Task.Delay(LockRetryDelayMs, cancellationToken).ConfigureAwait(false);
             }
         }
     }

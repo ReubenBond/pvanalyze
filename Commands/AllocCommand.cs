@@ -1,9 +1,23 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Etlx;
 using EtlxTraceLog = Microsoft.Diagnostics.Tracing.Etlx.TraceLog;
 
 namespace PVAnalyze.Commands;
+
+internal class AllocationInfo
+{
+    public string Name { get; set; } = "";
+    public long Count { get; set; }
+    public long TotalBytes { get; set; }
+    public long LargeObjectCount { get; set; }
+    public long LargeObjectBytes { get; set; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(AllocationsResponse))]
+internal partial class AllocJsonContext : JsonSerializerContext { }
 
 public static class AllocCommand
 {
@@ -11,27 +25,61 @@ public static class AllocCommand
     {
         var command = new Command("alloc", "Analyze memory allocations by type");
 
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file");
-        var formatOption = new Option<string>("--format", () => "text", "Output format: text, json");
-        var topOption = new Option<int>("--top", () => 20, "Number of types to show");
-        var processOption = new Option<string?>("--process", "Filter by process name");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var groupByOption = new Option<string>("--group-by", () => "type", "Group by: type, namespace, module");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file"
+        };
+        var formatOption = new Option<string>("--format")
+        {
+            DefaultValueFactory = _ => "text",
+            Description = "Output format: text, json"
+        };
+        var topOption = new Option<int>("--top")
+        {
+            DefaultValueFactory = _ => 20,
+            Description = "Number of types to show"
+        };
+        var processOption = new Option<string?>("--process")
+        {
+            Description = "Filter by process name"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var groupByOption = new Option<string>("--group-by")
+        {
+            DefaultValueFactory = _ => "type",
+            Description = "Group by: type, namespace, module"
+        };
 
-        command.AddArgument(traceFileArg);
-        command.AddOption(formatOption);
-        command.AddOption(topOption);
-        command.AddOption(processOption);
-        command.AddOption(fromOption);
-        command.AddOption(toOption);
-        command.AddOption(groupByOption);
+        command.Arguments.Add(traceFileArg);
+        command.Options.Add(formatOption);
+        command.Options.Add(topOption);
+        command.Options.Add(processOption);
+        command.Options.Add(fromOption);
+        command.Options.Add(toOption);
+        command.Options.Add(groupByOption);
 
-        command.SetHandler(Execute, traceFileArg, formatOption, topOption, processOption, fromOption, toOption, groupByOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var top = parseResult.GetValue(topOption)!;
+            var processName = parseResult.GetValue(processOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var groupBy = parseResult.GetValue(groupByOption)!;
+            await Execute(traceFile, format, top, processName, fromMs, toMs, groupBy, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, string format, int top, string? processName, double? fromMs, double? toMs, string groupBy)
+    private static async Task Execute(FileInfo traceFile, string format, int top, string? processName, double? fromMs, double? toMs, string groupBy, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -41,7 +89,7 @@ public static class AllocCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new EtlxTraceLog(etlxPath);
             
             var allocations = new Dictionary<string, AllocationInfo>();
@@ -50,6 +98,8 @@ public static class AllocCommand
 
             foreach (var evt in traceLog.Events)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 // Look for allocation events (AllocationTick has type info, SampledObjectAllocation is higher frequency)
                 if (evt.EventName != "GC/AllocationTick" && evt.EventName != "GC/SampledObjectAllocation") continue;
 
@@ -142,12 +192,16 @@ public static class AllocCommand
 
             if (format == "json")
             {
-                OutputJson(allocations, totalBytes, totalCount, top, groupBy);
+                await OutputJson(allocations, totalBytes, totalCount, top, groupBy, cancellationToken).ConfigureAwait(false);
             }
             else
             {
                 OutputText(allocations, totalBytes, totalCount, top, groupBy);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -216,32 +270,27 @@ public static class AllocCommand
         }
     }
 
-    private static void OutputJson(Dictionary<string, AllocationInfo> allocations,
-        long totalBytes, long totalCount, int top, string groupBy)
+    private static async Task OutputJson(Dictionary<string, AllocationInfo> allocations,
+        long totalBytes, long totalCount, int top, string groupBy, CancellationToken cancellationToken)
     {
         var sorted = allocations.Values
             .OrderByDescending(a => a.TotalBytes)
             .Take(top)
             .ToList();
 
-        var output = new
-        {
-            totalAllocations = totalCount,
-            totalBytes = totalBytes,
-            groupBy = groupBy,
-            allocations = sorted.Select(a => new
-            {
-                name = a.Name,
-                count = a.Count,
-                totalBytes = a.TotalBytes,
-                averageBytes = a.Count > 0 ? a.TotalBytes / a.Count : 0,
-                largeObjectCount = a.LargeObjectCount,
-                largeObjectBytes = a.LargeObjectBytes
-            }).ToList()
-        };
+        var response = new AllocationsResponse(
+            totalCount,
+            totalBytes,
+            groupBy,
+            sorted.Select(a => new AllocationEntry(
+                a.Name,
+                a.Count,
+                a.TotalBytes,
+                a.Count > 0 ? a.TotalBytes / (double)a.Count : 0,
+                a.LargeObjectCount,
+                a.LargeObjectBytes)).ToList());
 
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        Console.WriteLine(JsonSerializer.Serialize(output, options));
+        await JsonOutput.WriteAsync(response, AllocJsonContext.Default.AllocationsResponse, cancellationToken).ConfigureAwait(false);
     }
 
     private static string FormatBytes(long bytes)
@@ -259,14 +308,5 @@ public static class AllocCommand
     {
         if (name.Length <= maxLen) return name;
         return "..." + name.Substring(name.Length - maxLen + 3);
-    }
-
-    private class AllocationInfo
-    {
-        public string Name { get; set; } = "";
-        public long Count { get; set; }
-        public long TotalBytes { get; set; }
-        public long LargeObjectCount { get; set; }
-        public long LargeObjectBytes { get; set; }
     }
 }

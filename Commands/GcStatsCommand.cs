@@ -1,22 +1,81 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Analysis;
 using Microsoft.Diagnostics.Tracing.Analysis.GC;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
 
+internal class GcProcessStats
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public int TotalGCs { get; set; }
+    public double TotalAllocatedMB { get; set; }
+    public double TotalGcCpuMSec { get; set; }
+    public double TotalPauseTimeMSec { get; set; }
+    public double MaxHeapSizeMB { get; set; }
+    public double PauseTimePercent { get; set; }
+    public int Gen0Count { get; set; }
+    public int Gen1Count { get; set; }
+    public int Gen2Count { get; set; }
+    public int HeapCount { get; set; }
+}
+
+internal class GcEventInfo
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public int GcNumber { get; set; }
+    public int Generation { get; set; }
+    public string Type { get; set; } = "";
+    public string Reason { get; set; } = "";
+    public double StartTimeMs { get; set; }
+    public double PauseDurationMs { get; set; }
+    public double HeapSizeBeforeMB { get; set; }
+    public double HeapSizeAfterMB { get; set; }
+    public double PromotedMB { get; set; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<GcProcessStats>))]
+[JsonSerializable(typeof(List<GcEventInfo>))]
+internal partial class GcStatsJsonContext : JsonSerializerContext { }
+
 public static class GcStatsCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var processOption = new Option<string?>("--process", "Filter by process name");
-        var timelineOption = new Option<bool>("--timeline", "Show per-GC timeline");
-        var longestOption = new Option<int?>("--longest", "Show N longest GC pauses");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var processOption = new Option<string?>("--process")
+        {
+            Description = "Filter by process name"
+        };
+        var timelineOption = new Option<bool>("--timeline")
+        {
+            Description = "Show per-GC timeline"
+        };
+        var longestOption = new Option<int?>("--longest")
+        {
+            Description = "Show N longest GC pauses"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
 
         var command = new Command("gcstats", "Display GC statistics from a trace")
         {
@@ -29,12 +88,22 @@ public static class GcStatsCommand
             toOption
         };
 
-        command.SetHandler(Execute, traceFileArg, formatOption, processOption, timelineOption, longestOption, fromOption, toOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var processFilter = parseResult.GetValue(processOption)!;
+            var timeline = parseResult.GetValue(timelineOption)!;
+            var longest = parseResult.GetValue(longestOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            await Execute(traceFile, format, processFilter, timeline, longest, fromMs, toMs, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? processFilter,
-        bool timeline, int? longest, double? fromMs, double? toMs)
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? processFilter,
+        bool timeline, int? longest, double? fromMs, double? toMs, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -44,7 +113,7 @@ public static class GcStatsCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
@@ -136,12 +205,16 @@ public static class GcStatsCommand
             // Determine output mode
             if (timeline || longest.HasValue)
             {
-                OutputTimeline(allGcEvents, format, longest);
+                await OutputTimeline(allGcEvents, format, longest, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                OutputSummary(processStats, format);
+                await OutputSummary(processStats, format, cancellationToken).ConfigureAwait(false);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -149,18 +222,13 @@ public static class GcStatsCommand
         }
     }
 
-    private static void OutputSummary(List<GcProcessStats> processes, OutputFormat format)
+    private static async Task OutputSummary(List<GcProcessStats> processes, OutputFormat format, CancellationToken cancellationToken)
     {
         processes = processes.OrderByDescending(p => p.TotalPauseTimeMSec).ToList();
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions 
-            { 
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-            Console.WriteLine(JsonSerializer.Serialize(processes, options));
+            await JsonOutput.WriteAsync(processes, GcStatsJsonContext.Default.ListGcProcessStats, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -185,7 +253,7 @@ public static class GcStatsCommand
         }
     }
 
-    private static void OutputTimeline(List<GcEventInfo> gcEvents, OutputFormat format, int? longest)
+    private static async Task OutputTimeline(List<GcEventInfo> gcEvents, OutputFormat format, int? longest, CancellationToken cancellationToken)
     {
         // Sort by pause duration if showing longest, otherwise by time
         var events = longest.HasValue
@@ -194,12 +262,7 @@ public static class GcStatsCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions 
-            { 
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            };
-            Console.WriteLine(JsonSerializer.Serialize(events, options));
+            await JsonOutput.WriteAsync(events, GcStatsJsonContext.Default.ListGcEventInfo, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -222,37 +285,6 @@ public static class GcStatsCommand
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
-    }
-
-    private class GcProcessStats
-    {
-        public int ProcessId { get; set; }
-        public string ProcessName { get; set; } = "";
-        public int TotalGCs { get; set; }
-        public double TotalAllocatedMB { get; set; }
-        public double TotalGcCpuMSec { get; set; }
-        public double TotalPauseTimeMSec { get; set; }
-        public double MaxHeapSizeMB { get; set; }
-        public double PauseTimePercent { get; set; }
-        public int Gen0Count { get; set; }
-        public int Gen1Count { get; set; }
-        public int Gen2Count { get; set; }
-        public int HeapCount { get; set; }
-    }
-
-    private class GcEventInfo
-    {
-        public int ProcessId { get; set; }
-        public string ProcessName { get; set; } = "";
-        public int GcNumber { get; set; }
-        public int Generation { get; set; }
-        public string Type { get; set; } = "";
-        public string Reason { get; set; } = "";
-        public double StartTimeMs { get; set; }
-        public double PauseDurationMs { get; set; }
-        public double HeapSizeBeforeMB { get; set; }
-        public double HeapSizeAfterMB { get; set; }
-        public double PromotedMB { get; set; }
     }
 }
 

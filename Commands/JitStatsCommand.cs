@@ -1,17 +1,46 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Analysis;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
 
+internal class JitProcessStats
+{
+    public int ProcessId { get; set; }
+    public string ProcessName { get; set; } = "";
+    public long TotalMethodsJitted { get; set; }
+    public double TotalJitCpuTimeMSec { get; set; }
+    public long TotalILSize { get; set; }
+    public long TotalNativeSize { get; set; }
+    public long ForegroundCount { get; set; }
+    public long BackgroundCount { get; set; }
+    public int InliningSuccesses { get; set; }
+    public int InliningFailures { get; set; }
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<JitProcessStats>))]
+internal partial class JitStatsJsonContext : JsonSerializerContext { }
+
 public static class JitStatsCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var processOption = new Option<string?>("--process", "Filter by process name");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var processOption = new Option<string?>("--process")
+        {
+            Description = "Filter by process name"
+        };
 
         var command = new Command("jitstats", "Display JIT compilation statistics from a trace")
         {
@@ -20,11 +49,17 @@ public static class JitStatsCommand
             processOption
         };
 
-        command.SetHandler(Execute, traceFileArg, formatOption, processOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var processFilter = parseResult.GetValue(processOption)!;
+            await Execute(traceFile, format, processFilter, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? processFilter)
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? processFilter, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -34,7 +69,7 @@ public static class JitStatsCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
@@ -88,7 +123,7 @@ public static class JitStatsCommand
             switch (format)
             {
                 case OutputFormat.Json:
-                    OutputJson(processes);
+                    await OutputJson(processes, cancellationToken).ConfigureAwait(false);
                     break;
                 case OutputFormat.Text:
                 default:
@@ -96,6 +131,10 @@ public static class JitStatsCommand
                     break;
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -124,27 +163,14 @@ public static class JitStatsCommand
         }
     }
 
-    private static void OutputJson(List<JitProcessStats> processes)
+    private static async Task OutputJson(List<JitProcessStats> processes, CancellationToken cancellationToken)
     {
-        var options = new JsonSerializerOptions 
-        { 
-            WriteIndented = true,
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-        };
-        Console.WriteLine(JsonSerializer.Serialize(processes, options));
+        await JsonOutput.WriteAsync(processes, JitStatsJsonContext.Default.ListJitProcessStats, cancellationToken).ConfigureAwait(false);
     }
 
-    private class JitProcessStats
+    private static string Truncate(string s, int maxLen)
     {
-        public int ProcessId { get; set; }
-        public string ProcessName { get; set; } = "";
-        public long TotalMethodsJitted { get; set; }
-        public double TotalJitCpuTimeMSec { get; set; }
-        public long TotalILSize { get; set; }
-        public long TotalNativeSize { get; set; }
-        public long ForegroundCount { get; set; }
-        public long BackgroundCount { get; set; }
-        public int InliningSuccesses { get; set; }
-        public int InliningFailures { get; set; }
+        if (string.IsNullOrEmpty(s)) return "";
+        return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
     }
 }

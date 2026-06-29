@@ -1,23 +1,56 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing.Stacks;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 using PVAnalyze;
 
 namespace PVAnalyze.Commands;
 
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(CallTreeResponse))]
+[JsonSerializable(typeof(CallerCalleeResponse))]
+internal partial class CallTreeJsonContext : JsonSerializerContext { }
+
 public static class CallTreeCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var depthOption = new Option<int>("--depth", () => 3, "Max depth to display");
-        var hotPathOption = new Option<bool>("--hot-path", "Follow the hot path (dominant call chain)");
-        var callerCalleeOption = new Option<string?>("--caller-callee", "Show callers and callees for the specified method name");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var minPercentOption = new Option<double>("--min-percent", () => 1.0, "Hide nodes below this inclusive % threshold");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var depthOption = new Option<int>("--depth")
+        {
+            DefaultValueFactory = _ => 3,
+            Description = "Max depth to display"
+        };
+        var hotPathOption = new Option<bool>("--hot-path")
+        {
+            Description = "Follow the hot path (dominant call chain)"
+        };
+        var callerCalleeOption = new Option<string?>("--caller-callee")
+        {
+            Description = "Show callers and callees for the specified method name"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var minPercentOption = new Option<double>("--min-percent")
+        {
+            DefaultValueFactory = _ => 1.0,
+            Description = "Hide nodes below this inclusive % threshold"
+        };
 
         var command = new Command("calltree", "CPU call tree analysis with hot path detection")
         {
@@ -31,23 +64,23 @@ public static class CallTreeCommand
             minPercentOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
         {
-            var traceFile = context.ParseResult.GetValueForArgument(traceFileArg);
-            var format = context.ParseResult.GetValueForOption(formatOption);
-            var depth = context.ParseResult.GetValueForOption(depthOption);
-            var hotPath = context.ParseResult.GetValueForOption(hotPathOption);
-            var callerCallee = context.ParseResult.GetValueForOption(callerCalleeOption);
-            var fromMs = context.ParseResult.GetValueForOption(fromOption);
-            var toMs = context.ParseResult.GetValueForOption(toOption);
-            var minPercent = context.ParseResult.GetValueForOption(minPercentOption);
-            Execute(traceFile, format, depth, hotPath, callerCallee, fromMs, toMs, minPercent);
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var depth = parseResult.GetValue(depthOption)!;
+            var hotPath = parseResult.GetValue(hotPathOption)!;
+            var callerCallee = parseResult.GetValue(callerCalleeOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var minPercent = parseResult.GetValue(minPercentOption)!;
+            await Execute(traceFile, format, depth, hotPath, callerCallee, fromMs, toMs, minPercent, cancellationToken).ConfigureAwait(false);
         });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, int depth,
-        bool hotPath, string? callerCallee, double? fromMs, double? toMs, double minPercent)
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, int depth,
+        bool hotPath, string? callerCallee, double? fromMs, double? toMs, double minPercent, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -57,7 +90,7 @@ public static class CallTreeCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             // Build stack source with optional time filter
@@ -83,17 +116,21 @@ public static class CallTreeCommand
 
             if (!string.IsNullOrEmpty(callerCallee))
             {
-                OutputCallerCallee(callTree, callerCallee!, format);
+                await OutputCallerCallee(callTree, callerCallee!, format, cancellationToken).ConfigureAwait(false);
             }
             else if (hotPath)
             {
-                OutputHotPath(callTree, format);
+                await OutputHotPath(callTree, format, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                OutputCallTree(callTree, depth, format, minPercent);
+                await OutputCallTree(callTree, depth, format, minPercent, cancellationToken).ConfigureAwait(false);
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -101,7 +138,7 @@ public static class CallTreeCommand
         }
     }
 
-    private static void OutputCallTree(CallTree callTree, int maxDepth, OutputFormat format, double minPercent)
+    private static async Task OutputCallTree(CallTree callTree, int maxDepth, OutputFormat format, double minPercent, CancellationToken cancellationToken)
     {
         var result = TraceAnalyzer.GetCallTree(callTree, maxDepth);
         var unfilteredCount = CountNodes(result.Nodes);
@@ -113,8 +150,7 @@ public static class CallTreeCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(result, options));
+            await JsonOutput.WriteAsync(result, CallTreeJsonContext.Default.CallTreeResponse, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -143,15 +179,14 @@ public static class CallTreeCommand
         }
     }
 
-    private static void OutputHotPath(CallTree callTree, OutputFormat format)
+    private static async Task OutputHotPath(CallTree callTree, OutputFormat format, CancellationToken cancellationToken)
     {
         // Start from root (path = [0] = first real child)
         var result = TraceAnalyzer.GetHotPath(callTree, new[] { 0 });
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(result, options));
+            await JsonOutput.WriteAsync(result, CallTreeJsonContext.Default.CallTreeResponse, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -179,14 +214,13 @@ public static class CallTreeCommand
         }
     }
 
-    private static void OutputCallerCallee(CallTree callTree, string method, OutputFormat format)
+    private static async Task OutputCallerCallee(CallTree callTree, string method, OutputFormat format, CancellationToken cancellationToken)
     {
         var result = TraceAnalyzer.GetCallerCallee(callTree, method);
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(result, options));
+            await JsonOutput.WriteAsync(result, CallTreeJsonContext.Default.CallerCalleeResponse, cancellationToken).ConfigureAwait(false);
         }
         else
         {

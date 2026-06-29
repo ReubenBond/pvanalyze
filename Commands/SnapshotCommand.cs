@@ -1,29 +1,56 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 using PVAnalyze;
 
 namespace PVAnalyze.Commands;
 
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(SnapshotResponse))]
+internal partial class SnapshotJsonContext : JsonSerializerContext { }
+
 public static class SnapshotCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var atOption = new Option<double>("--at", "Center timestamp in milliseconds") { IsRequired = true };
-        var windowOption = new Option<double>("--window", () => 100, "Half-window size in ms (default ±100ms)");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Json, "Output format");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var atOption = new Option<double>("--at")
+        {
+            Description = "Center timestamp in milliseconds",
+            Required = true
+        };
+        var windowOption = new Option<double>("--window")
+        {
+            DefaultValueFactory = _ => 100,
+            Description = "Half-window size in ms (default ±100ms)"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Json,
+            Description = "Output format"
+        };
 
         var command = new Command("snapshot", "Show what was happening at a specific point in time")
         {
             traceFileArg, atOption, windowOption, formatOption
         };
 
-        command.SetHandler(Execute, traceFileArg, atOption, windowOption, formatOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var at = parseResult.GetValue(atOption)!;
+            var window = parseResult.GetValue(windowOption)!;
+            var format = parseResult.GetValue(formatOption)!;
+            await Execute(traceFile, at, window, format, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, double at, double window, OutputFormat format)
+    private static async Task Execute(FileInfo traceFile, double at, double window, OutputFormat format, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -33,19 +60,14 @@ public static class SnapshotCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             var result = TraceAnalyzer.GetSnapshot(traceLog, at, window);
 
             if (format == OutputFormat.Json)
             {
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
-                Console.WriteLine(JsonSerializer.Serialize(result, options));
+                await JsonOutput.WriteAsync(result, SnapshotJsonContext.Default.SnapshotResponse, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -73,6 +95,10 @@ public static class SnapshotCommand
                     Console.WriteLine($"  Events: {result.Events.TotalCount} total");
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

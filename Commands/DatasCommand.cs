@@ -1,20 +1,47 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<DatasResponse>))]
+internal partial class DatasJsonContext : JsonSerializerContext { }
 
 public static class DatasCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace or .etl file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var processOption = new Option<string?>("--process", "Filter by process name");
-        var samplesOption = new Option<bool>("--samples", "Show per-GC DATAS samples");
-        var tuningOption = new Option<bool>("--tuning", "Show heap count tuning decisions");
-        var gen2Option = new Option<bool>("--gen2", "Show gen2 full GC tuning events");
-        var changesOnlyOption = new Option<bool>("--changes-only", "Only show events where heap count actually changed");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace or .etl file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var processOption = new Option<string?>("--process")
+        {
+            Description = "Filter by process name"
+        };
+        var samplesOption = new Option<bool>("--samples")
+        {
+            Description = "Show per-GC DATAS samples"
+        };
+        var tuningOption = new Option<bool>("--tuning")
+        {
+            Description = "Show heap count tuning decisions"
+        };
+        var gen2Option = new Option<bool>("--gen2")
+        {
+            Description = "Show gen2 full GC tuning events"
+        };
+        var changesOnlyOption = new Option<bool>("--changes-only")
+        {
+            Description = "Only show events where heap count actually changed"
+        };
 
         var command = new Command("datas", "Display DATAS (Dynamic Adaptation) statistics from a trace")
         {
@@ -27,12 +54,22 @@ public static class DatasCommand
             changesOnlyOption
         };
 
-        command.SetHandler(Execute, traceFileArg, formatOption, processOption, samplesOption, tuningOption, gen2Option, changesOnlyOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var processFilter = parseResult.GetValue(processOption)!;
+            var showSamples = parseResult.GetValue(samplesOption)!;
+            var showTuning = parseResult.GetValue(tuningOption)!;
+            var showGen2 = parseResult.GetValue(gen2Option)!;
+            var changesOnly = parseResult.GetValue(changesOnlyOption)!;
+            await Execute(traceFile, format, processFilter, showSamples, showTuning, showGen2, changesOnly, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? processFilter,
-        bool showSamples, bool showTuning, bool showGen2, bool changesOnly)
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? processFilter,
+        bool showSamples, bool showTuning, bool showGen2, bool changesOnly, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -42,7 +79,7 @@ public static class DatasCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             var results = TraceAnalyzer.GetDatasStats(traceLog, processFilter);
@@ -57,12 +94,7 @@ public static class DatasCommand
             if (format == OutputFormat.Json)
             {
                 var output = changesOnly ? FilterToChangesOnly(results) : results;
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
-                Console.WriteLine(JsonSerializer.Serialize(output, options));
+                await JsonOutput.WriteAsync(output, DatasJsonContext.Default.ListDatasResponse, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -71,6 +103,8 @@ public static class DatasCommand
 
             foreach (var proc in results)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 Console.WriteLine($"=== DATAS Stats for {proc.ProcessName} (PID {proc.ProcessId}) ===");
                 Console.WriteLine();
 
@@ -104,6 +138,10 @@ public static class DatasCommand
                     OutputGen2Tuning(proc, changesOnly);
                 }
             }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

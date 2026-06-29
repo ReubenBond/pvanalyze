@@ -1,4 +1,6 @@
 using System.CommandLine;
+using System.CommandLine.Invocation;
+using System.CommandLine.Parsing;
 using PVAnalyze.Commands;
 
 namespace PVAnalyze;
@@ -23,6 +25,11 @@ class Program
             CleanCommand.Create(),
         };
 
-        return await rootCommand.InvokeAsync(args);
+        var configuration = new InvocationConfiguration
+        {
+            ProcessTerminationTimeout = TimeSpan.FromSeconds(5)
+        };
+
+        return await rootCommand.Parse(args).InvokeAsync(configuration);
     }
 }

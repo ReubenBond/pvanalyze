@@ -1,32 +1,73 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 using PVAnalyze;
 
 namespace PVAnalyze.Commands;
 
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(TimelineResponse))]
+[JsonSerializable(typeof(GcBucket))]
+[JsonSerializable(typeof(CpuBucket))]
+[JsonSerializable(typeof(ExceptionBucket))]
+[JsonSerializable(typeof(AllocBucket))]
+[JsonSerializable(typeof(JitBucket))]
+[JsonSerializable(typeof(EventBucket))]
+internal partial class TimelineJsonContext : JsonSerializerContext { }
+
 public static class TimelineCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var lanesOption = new Option<string>("--lanes", () => "gc,cpu,exceptions", "Comma-separated lanes: gc,cpu,exceptions,alloc,jit,events");
-        var bucketsOption = new Option<int>("--buckets", () => 50, "Number of time buckets");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Json, "Output format");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var lanesOption = new Option<string>("--lanes")
+        {
+            DefaultValueFactory = _ => "gc,cpu,exceptions",
+            Description = "Comma-separated lanes: gc,cpu,exceptions,alloc,jit,events"
+        };
+        var bucketsOption = new Option<int>("--buckets")
+        {
+            DefaultValueFactory = _ => 50,
+            Description = "Number of time buckets"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Json,
+            Description = "Output format"
+        };
 
         var command = new Command("timeline", "Show a unified timeline with multiple event lanes bucketed over time")
         {
             traceFileArg, lanesOption, bucketsOption, fromOption, toOption, formatOption
         };
 
-        command.SetHandler(Execute, traceFileArg, lanesOption, bucketsOption, fromOption, toOption, formatOption);
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
+        {
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var lanes = parseResult.GetValue(lanesOption)!;
+            var buckets = parseResult.GetValue(bucketsOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var format = parseResult.GetValue(formatOption)!;
+            await Execute(traceFile, lanes, buckets, fromMs, toMs, format, cancellationToken).ConfigureAwait(false);
+        });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, string lanes, int buckets,
-        double? fromMs, double? toMs, OutputFormat format)
+    private static async Task Execute(FileInfo traceFile, string lanes, int buckets,
+        double? fromMs, double? toMs, OutputFormat format, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -36,7 +77,7 @@ public static class TimelineCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             var laneSet = new HashSet<string>(
@@ -47,12 +88,7 @@ public static class TimelineCommand
 
             if (format == OutputFormat.Json)
             {
-                var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true,
-                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-                };
-                Console.WriteLine(JsonSerializer.Serialize(result, options));
+                await JsonOutput.WriteAsync(result, TimelineJsonContext.Default.TimelineResponse, cancellationToken).ConfigureAwait(false);
             }
             else
             {
@@ -60,10 +96,16 @@ public static class TimelineCommand
                 Console.WriteLine();
                 foreach (var (laneName, bucketArray) in result.Lanes)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     Console.WriteLine($"  Lane: {laneName} ({bucketArray.Length} buckets)");
                 }
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {

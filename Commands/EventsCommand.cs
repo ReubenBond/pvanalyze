@@ -1,25 +1,83 @@
 using System.CommandLine;
-using System.Text.Json;
+using System.CommandLine.Parsing;
+using System.Text.Json.Serialization;
 using Microsoft.Diagnostics.Tracing;
 using Etlx = Microsoft.Diagnostics.Tracing.Etlx;
 
 namespace PVAnalyze.Commands;
 
+internal class EventTypeInfo
+{
+    public string Provider { get; set; } = "";
+    public string EventName { get; set; } = "";
+    public int Count { get; set; }
+}
+
+internal class EventInfo
+{
+    public double TimestampMs { get; set; }
+    public string Provider { get; set; } = "";
+    public string EventName { get; set; } = "";
+    public int ProcessId { get; set; }
+    public int ThreadId { get; set; }
+    public string Message { get; set; } = "";
+}
+
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSerializable(typeof(List<EventTypeInfo>))]
+[JsonSerializable(typeof(List<EventInfo>))]
+internal partial class EventsJsonContext : JsonSerializerContext { }
+
 public static class EventsCommand
 {
     public static Command Create()
     {
-        var traceFileArg = new Argument<FileInfo>("trace-file", "Path to the .nettrace file to analyze");
-        var formatOption = new Option<OutputFormat>("--format", () => OutputFormat.Text, "Output format");
-        var typeOption = new Option<string?>("--type", "Filter by event type name (substring match)");
-        var providerOption = new Option<string?>("--provider", "Filter by provider name (substring match)");
-        var listOption = new Option<bool>("--list", "List unique event types only");
-        var limitOption = new Option<int>("--limit", () => 100, "Maximum number of events to show");
-        var fromOption = new Option<double?>("--from", "Start time in milliseconds");
-        var toOption = new Option<double?>("--to", "End time in milliseconds");
-        var pidOption = new Option<int?>("--pid", "Filter by process ID");
-        var tidOption = new Option<int?>("--tid", "Filter by thread ID");
-        var payloadOption = new Option<string?>("--payload", "Filter by payload content (substring match)");
+        var traceFileArg = new Argument<FileInfo>("trace-file")
+        {
+            Description = "Path to the .nettrace file to analyze"
+        };
+        var formatOption = new Option<OutputFormat>("--format")
+        {
+            DefaultValueFactory = _ => OutputFormat.Text,
+            Description = "Output format"
+        };
+        var typeOption = new Option<string?>("--type")
+        {
+            Description = "Filter by event type name (substring match)"
+        };
+        var providerOption = new Option<string?>("--provider")
+        {
+            Description = "Filter by provider name (substring match)"
+        };
+        var listOption = new Option<bool>("--list")
+        {
+            Description = "List unique event types only"
+        };
+        var limitOption = new Option<int>("--limit")
+        {
+            DefaultValueFactory = _ => 100,
+            Description = "Maximum number of events to show"
+        };
+        var fromOption = new Option<double?>("--from")
+        {
+            Description = "Start time in milliseconds"
+        };
+        var toOption = new Option<double?>("--to")
+        {
+            Description = "End time in milliseconds"
+        };
+        var pidOption = new Option<int?>("--pid")
+        {
+            Description = "Filter by process ID"
+        };
+        var tidOption = new Option<int?>("--tid")
+        {
+            Description = "Filter by thread ID"
+        };
+        var payloadOption = new Option<string?>("--payload")
+        {
+            Description = "Filter by payload content (substring match)"
+        };
 
         var command = new Command("events", "List and filter events from a trace")
         {
@@ -36,27 +94,27 @@ public static class EventsCommand
             payloadOption
         };
 
-        command.SetHandler(async (context) =>
+        command.SetAction(async (ParseResult parseResult, CancellationToken cancellationToken) =>
         {
-            var traceFile = context.ParseResult.GetValueForArgument(traceFileArg);
-            var format = context.ParseResult.GetValueForOption(formatOption);
-            var typeFilter = context.ParseResult.GetValueForOption(typeOption);
-            var providerFilter = context.ParseResult.GetValueForOption(providerOption);
-            var listOnly = context.ParseResult.GetValueForOption(listOption);
-            var limit = context.ParseResult.GetValueForOption(limitOption);
-            var fromMs = context.ParseResult.GetValueForOption(fromOption);
-            var toMs = context.ParseResult.GetValueForOption(toOption);
-            var pid = context.ParseResult.GetValueForOption(pidOption);
-            var tid = context.ParseResult.GetValueForOption(tidOption);
-            var payload = context.ParseResult.GetValueForOption(payloadOption);
-            Execute(traceFile, format, typeFilter, providerFilter, listOnly, limit, fromMs, toMs, pid, tid, payload);
+            var traceFile = parseResult.GetValue(traceFileArg)!;
+            var format = parseResult.GetValue(formatOption)!;
+            var typeFilter = parseResult.GetValue(typeOption)!;
+            var providerFilter = parseResult.GetValue(providerOption)!;
+            var listOnly = parseResult.GetValue(listOption)!;
+            var limit = parseResult.GetValue(limitOption)!;
+            var fromMs = parseResult.GetValue(fromOption)!;
+            var toMs = parseResult.GetValue(toOption)!;
+            var pid = parseResult.GetValue(pidOption)!;
+            var tid = parseResult.GetValue(tidOption)!;
+            var payload = parseResult.GetValue(payloadOption)!;
+            await Execute(traceFile, format, typeFilter, providerFilter, listOnly, limit, fromMs, toMs, pid, tid, payload, cancellationToken).ConfigureAwait(false);
         });
         return command;
     }
 
-    private static void Execute(FileInfo traceFile, OutputFormat format, string? typeFilter, 
+    private static async Task Execute(FileInfo traceFile, OutputFormat format, string? typeFilter, 
         string? providerFilter, bool listOnly, int limit, double? fromMs, double? toMs,
-        int? pidFilter, int? tidFilter, string? payloadFilter)
+        int? pidFilter, int? tidFilter, string? payloadFilter, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -66,20 +124,24 @@ public static class EventsCommand
 
         try
         {
-            string etlxPath = EtlxCache.GetOrCreateEtlx(traceFile.FullName);
+            string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             if (listOnly)
             {
-                ListEventTypes(traceLog, format, providerFilter, fromMs, toMs);
+                await ListEventTypes(traceLog, format, providerFilter, fromMs, toMs, cancellationToken).ConfigureAwait(false);
             }
             else
             {
-                ListEvents(traceLog, format, typeFilter, providerFilter, limit, fromMs, toMs,
-                    pidFilter, tidFilter, payloadFilter);
+                await ListEvents(traceLog, format, typeFilter, providerFilter, limit, fromMs, toMs,
+                    pidFilter, tidFilter, payloadFilter, cancellationToken).ConfigureAwait(false);
             }
 
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -87,13 +149,15 @@ public static class EventsCommand
         }
     }
 
-    private static void ListEventTypes(Etlx.TraceLog traceLog, OutputFormat format, 
-        string? providerFilter, double? fromMs, double? toMs)
+    private static async Task ListEventTypes(Etlx.TraceLog traceLog, OutputFormat format, 
+        string? providerFilter, double? fromMs, double? toMs, CancellationToken cancellationToken)
     {
         var eventTypes = new Dictionary<string, EventTypeInfo>();
 
         foreach (var evt in traceLog.Events)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Time filtering
             if (fromMs.HasValue && evt.TimeStampRelativeMSec < fromMs.Value) continue;
             if (toMs.HasValue && evt.TimeStampRelativeMSec > toMs.Value) continue;
@@ -121,8 +185,7 @@ public static class EventsCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(sorted, options));
+            await JsonOutput.WriteAsync(sorted, EventsJsonContext.Default.ListEventTypeInfo, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -137,15 +200,17 @@ public static class EventsCommand
         }
     }
 
-    private static void ListEvents(Etlx.TraceLog traceLog, OutputFormat format, 
+    private static async Task ListEvents(Etlx.TraceLog traceLog, OutputFormat format, 
         string? typeFilter, string? providerFilter, int limit, double? fromMs, double? toMs,
-        int? pidFilter, int? tidFilter, string? payloadFilter)
+        int? pidFilter, int? tidFilter, string? payloadFilter, CancellationToken cancellationToken)
     {
         var events = new List<EventInfo>();
         int count = 0;
 
         foreach (var evt in traceLog.Events)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             // Time filtering
             if (fromMs.HasValue && evt.TimeStampRelativeMSec < fromMs.Value) continue;
             if (toMs.HasValue && evt.TimeStampRelativeMSec > toMs.Value) continue;
@@ -187,8 +252,7 @@ public static class EventsCommand
 
         if (format == OutputFormat.Json)
         {
-            var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-            Console.WriteLine(JsonSerializer.Serialize(events, options));
+            await JsonOutput.WriteAsync(events, EventsJsonContext.Default.ListEventInfo, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -237,22 +301,5 @@ public static class EventsCommand
     {
         if (string.IsNullOrEmpty(s)) return "";
         return s.Length <= maxLen ? s : s.Substring(0, maxLen - 3) + "...";
-    }
-
-    private class EventTypeInfo
-    {
-        public string Provider { get; set; } = "";
-        public string EventName { get; set; } = "";
-        public int Count { get; set; }
-    }
-
-    private class EventInfo
-    {
-        public double TimestampMs { get; set; }
-        public string Provider { get; set; } = "";
-        public string EventName { get; set; } = "";
-        public int ProcessId { get; set; }
-        public int ThreadId { get; set; }
-        public string Message { get; set; } = "";
     }
 }
