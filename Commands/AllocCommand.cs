@@ -186,7 +186,7 @@ public static class AllocCommand
             {
                 Console.WriteLine("No allocation events found in trace.");
                 Console.WriteLine("Hint: Collect with allocation tracking enabled:");
-                Console.WriteLine("  dotnet-trace collect --providers Microsoft-Windows-DotNETRuntime:0x80000:5 -- dotnet run");
+                Console.WriteLine("  dotnet-trace collect --providers Microsoft-Windows-DotNETRuntime:0x200001:5 -- dotnet run");
                 return;
             }
 
