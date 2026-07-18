@@ -58,11 +58,13 @@ public static class CpuStacksCommand
         {
             Description = "Sort by inclusive time instead of exclusive"
         };
-        var stackSourceOption = new Option<StackSourceKind>("--stack-source")
+        var stackSourceOption = new Option<string>("--stack-source")
         {
-            DefaultValueFactory = _ => StackSourceKind.Cpu,
-            Description = "Stack source: cpu; threadtime (PerfView /ThreadTime); or activity (context switches + Start/Stop events)"
+            DefaultValueFactory = _ => "cpu",
+            Description = "Stack source: cpu, threadtime, activity, activity-cpu, or activity-threadtime"
         };
+        stackSourceOption.AcceptOnlyFromAmong(
+            "cpu", "threadtime", "activity", "activity-cpu", "activity-threadtime");
 
         var command = new Command("cpustacks", "Analyze CPU, thread-time, or async activity stacks")
         {
@@ -88,7 +90,7 @@ public static class CpuStacksCommand
             var fromMs = parseResult.GetValue(fromOption)!;
             var toMs = parseResult.GetValue(toOption)!;
             var inclusive = parseResult.GetValue(inclusiveOption)!;
-            var stackSource = parseResult.GetValue(stackSourceOption);
+            var stackSource = StackSourceFactory.ParseKind(parseResult.GetValue(stackSourceOption)!);
             await Execute(traceFile, format, top, outputFile, groupBy, fromMs, toMs, inclusive, stackSource, cancellationToken).ConfigureAwait(false);
         });
         return command;
@@ -110,7 +112,8 @@ public static class CpuStacksCommand
             
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
-            var stackSource = StackSourceFactory.Create(traceLog, stackSourceKind, fromMs, toMs);
+            var stackSource = StackSourceFactory.Create(
+                traceLog, stackSourceKind, fromMs, toMs, out stackSourceKind);
 
             switch (format)
             {

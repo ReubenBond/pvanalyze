@@ -51,11 +51,13 @@ public static class CallTreeCommand
             DefaultValueFactory = _ => 1.0,
             Description = "Hide nodes below this inclusive % threshold"
         };
-        var stackSourceOption = new Option<StackSourceKind>("--stack-source")
+        var stackSourceOption = new Option<string>("--stack-source")
         {
-            DefaultValueFactory = _ => StackSourceKind.Cpu,
-            Description = "Stack source: cpu; threadtime (PerfView /ThreadTime); or activity (context switches + Start/Stop events)"
+            DefaultValueFactory = _ => "cpu",
+            Description = "Stack source: cpu, threadtime, activity, activity-cpu, or activity-threadtime"
         };
+        stackSourceOption.AcceptOnlyFromAmong(
+            "cpu", "threadtime", "activity", "activity-cpu", "activity-threadtime");
 
         var command = new Command("calltree", "Call tree analysis with hot path detection")
         {
@@ -80,7 +82,7 @@ public static class CallTreeCommand
             var fromMs = parseResult.GetValue(fromOption)!;
             var toMs = parseResult.GetValue(toOption)!;
             var minPercent = parseResult.GetValue(minPercentOption)!;
-            var stackSource = parseResult.GetValue(stackSourceOption);
+            var stackSource = StackSourceFactory.ParseKind(parseResult.GetValue(stackSourceOption)!);
             await Execute(traceFile, format, depth, hotPath, callerCallee, fromMs, toMs, minPercent, stackSource, cancellationToken).ConfigureAwait(false);
         });
         return command;
@@ -101,7 +103,8 @@ public static class CallTreeCommand
             string etlxPath = await EtlxCache.GetOrCreateEtlxAsync(traceFile.FullName, cancellationToken).ConfigureAwait(false);
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
-            var stackSource = StackSourceFactory.Create(traceLog, stackSourceKind, fromMs, toMs);
+            var stackSource = StackSourceFactory.Create(
+                traceLog, stackSourceKind, fromMs, toMs, out stackSourceKind);
 
             var callTree = new CallTree(ScalingPolicyKind.TimeMetric);
             callTree.StackSource = stackSource;

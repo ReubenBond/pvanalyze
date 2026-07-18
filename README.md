@@ -59,7 +59,8 @@ or additional providers unless that data is needed.
 |---|---|---|
 | CPU hotspots | `PerfView collect trace.etl.zip` | `cpustacks --stack-source cpu` |
 | Blocking and off-CPU time | `PerfView /ThreadTime collect trace.etl.zip` | `stacks --stack-source threadtime` |
-| Async request/activity latency | `PerfView /ThreadTime /Providers:*MyProvider collect trace.etl.zip` | `stacks --stack-source activity --inclusive` |
+| CPU used by async activities | `PerfView /Providers:*MyProvider collect trace.etl.zip` | `stacks --stack-source activity-cpu --inclusive` |
+| End-to-end async activity time | `PerfView /ThreadTime /Providers:*MyProvider collect trace.etl.zip` | `stacks --stack-source activity-threadtime --inclusive` |
 | Hardware counter samples | `PerfView /CpuCounters:Counter:Interval collect trace.etl.zip` | `events --type PMCSample` |
 | GC, allocation, JIT, exceptions | Default PerfView CLR providers, or targeted provider keywords | `gcstats`, `alloc`, `jitstats`, `exceptions` |
 | Arbitrary provider events | `/Providers:<provider-spec>` | `events` |
@@ -120,9 +121,12 @@ pvanalyze cpustacks trace.nettrace --format json
 # Thread-time stacks include CPU and blocked time from PerfView context switches
 pvanalyze stacks trace.etl.zip --stack-source threadtime --inclusive
 
-# Group thread time under EventSource Start/Stop activities and async tasks
-pvanalyze stacks trace.etl.zip --stack-source activity --inclusive
-pvanalyze calltree trace.etl.zip --stack-source activity --hot-path
+# Attribute sampled CPU to EventSource Start/Stop activities
+pvanalyze stacks trace.etl.zip --stack-source activity-cpu --inclusive
+
+# Include CPU, blocked, runnable, task, and await time under each activity
+pvanalyze stacks trace.etl.zip --stack-source activity-threadtime --inclusive
+pvanalyze calltree trace.etl.zip --stack-source activity-threadtime --hot-path
 
 # Export to SpeedScope for flame graph visualization
 pvanalyze cpustacks trace.nettrace --format speedscope
@@ -197,8 +201,13 @@ Options:
 - `--format text|json|speedscope`
 - `--top <N>` - Number of entries to show
 - `--group-by method|module|namespace` - Aggregation level
-- `--stack-source cpu|threadtime|activity` - Select on-CPU samples,
-  full thread time, or Start/Stop activity grouping
+- `--stack-source cpu|threadtime|activity-cpu|activity-threadtime|activity`
+  - `cpu`: sampled on-CPU stacks
+  - `threadtime`: CPU plus blocked and runnable time; requires context switches
+  - `activity-cpu`: sampled CPU grouped under Start/Stop activities
+  - `activity-threadtime`: full thread time grouped under Start/Stop activities
+  - `activity`: automatically chooses `activity-threadtime` when context switches
+    are present, otherwise `activity-cpu`
 - `--inclusive` - Sort by inclusive time instead of exclusive
 - `--from <ms>` / `--to <ms>` - Time range filter
 - `--output <file>` - Output file
@@ -220,16 +229,20 @@ pvanalyze cpustacks trace.nettrace --from 1000 --to 2000 --top 10
 # Analyze blocked and on-CPU time from a PerfView /ThreadTime trace
 pvanalyze stacks trace.etl.zip --stack-source threadtime --inclusive
 
-# Attribute CPU, blocked, task, and await time to async Start/Stop activities
-pvanalyze stacks trace.etl.zip --stack-source activity --inclusive
+# Attribute sampled CPU to async Start/Stop activities
+pvanalyze stacks trace.etl.zip --stack-source activity-cpu --inclusive
+
+# Attribute CPU, blocked, runnable, task, and await time to activities
+pvanalyze stacks trace.etl.zip --stack-source activity-threadtime --inclusive
 ```
 
-`threadtime` and `activity` require a PerfView trace collected using
-`/ThreadTime`. `activity` additionally requires the relevant application
-providers to emit EventSource Start/Stop events with activity IDs. The activity
-source uses TraceEvent's Start/Stop activity computer and preserves events
-before a `--from` boundary so activity state is reconstructed correctly before
-applying the requested time filter.
+Context-switch collection is required only for off-CPU attribution:
+`threadtime` and `activity-threadtime` therefore require a PerfView trace
+collected with `/ThreadTime`. `activity-cpu` does not require context switches;
+it needs sampled-profile events plus EventSource Start/Stop events with activity
+IDs. All activity modes use TraceEvent's Start/Stop activity computer and
+preserve events before a `--from` boundary so activity state is reconstructed
+correctly before applying the requested time filter.
 
 ### `alloc <trace-file>`
 
@@ -321,7 +334,8 @@ Options:
 - `--hot-path` - Follow the dominant call chain (child ≥80% of parent)
 - `--caller-callee <method>` - Show callers and callees for a method
 - `--format text|json` - Output format
-- `--stack-source cpu|threadtime|activity` - Stack source (default: `cpu`)
+- `--stack-source cpu|threadtime|activity-cpu|activity-threadtime|activity`
+  - `activity` selects the richest supported activity mode automatically
 - `--from <ms>` / `--to <ms>` - Time range filter
 
 Examples:
