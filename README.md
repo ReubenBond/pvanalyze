@@ -1,15 +1,16 @@
 # pvanalyze
 
-A cross-platform command-line tool for analyzing .NET performance traces from
-`dotnet-trace` (`.nettrace`) and PerfView (`.etl`, `.etl.zip`, and `.etlx`).
+A cross-platform command-line tool for collecting and analyzing .NET performance
+traces. It collects EventPipe (`.nettrace`) traces natively and analyzes those
+traces as well as PerfView (`.etl`, `.etl.zip`, and `.etlx`) traces.
 
 > Point your coding agent at this repo and let it work. There's intentionally no `SKILL.md` or `AGENTS.md` — `--help` and this README are enough context for today's frontier models, based on my experience.
 
 ## Overview
 
-`pvanalyze` runs on **macOS, Linux, and Windows**. Use PerfView to collect traces
-on Windows and `dotnet-trace` to collect them on macOS and Linux. Analysis with
-`pvanalyze` is cross-platform. The CLI is ideal for:
+`pvanalyze` runs on **macOS, Linux, and Windows**. Native EventPipe collection
+and trace analysis are cross-platform. PerfView is the recommended collector on
+Windows when ETW capabilities are needed. The CLI is ideal for:
 
 - Automation and scripting
 - CI/CD pipelines
@@ -38,6 +39,40 @@ dotnet publish -c Release -r osx-arm64 --self-contained
 
 ### Collect a Trace
 
+#### Native EventPipe collection
+
+Use `pvanalyze collect` to attach to a process:
+
+```bash
+# Collect 30 seconds of sampled CPU stacks
+pvanalyze collect --process-id <PID> --profile cpu \
+  --duration-seconds 30 --output trace.nettrace
+
+# Collect allocation and GC events
+pvanalyze collect --process-id <PID> --profile gc-verbose \
+  --duration-seconds 30 --output allocations.nettrace
+```
+
+It can also launch the target process. Use `--delay-seconds` to exclude a known
+startup or warmup period:
+
+```bash
+pvanalyze collect --profile cpu --duration-seconds 30 \
+  --delay-seconds 5 --output trace.nettrace -- dotnet myapp.dll
+```
+
+Use `--profile none` with one or more explicit provider specifications when a
+built-in profile is not appropriate:
+
+```bash
+pvanalyze collect --process-id <PID> --profile none \
+  --providers "Microsoft-Windows-DotNETRuntime:0x4C14FCCBD:5" \
+  --duration-seconds 30 --output runtime.nettrace
+```
+
+Provider specifications use `Name:Keywords:Level`; separate multiple providers
+with semicolons.
+
 #### Windows: PerfView
 
 PerfView is the recommended collector on Windows. It can capture ETW kernel and
@@ -65,21 +100,6 @@ intervals for the current machine.
 # Stop collection by pressing S in the PerfView console.
 PerfView /AcceptEula /NoGui collect trace.etl.zip
 PerfView /AcceptEula /NoGui /ThreadTime collect threadtime.etl.zip
-```
-
-#### macOS and Linux: dotnet-trace
-
-Use `dotnet-trace` to collect EventPipe traces:
-
-```bash
-# Install dotnet-trace (one-time)
-dotnet tool install --global dotnet-trace
-
-# Collect a trace from a running process
-dotnet-trace collect --process-id <PID> --output trace.nettrace
-
-# Or collect while running an app
-dotnet-trace collect -- dotnet run
 ```
 
 All analysis commands accept `.nettrace`, `.etl`, `.etl.zip`, and `.etlx`
@@ -396,5 +416,5 @@ pvanalyze events trace.nettrace --from 500 --to 1000 --type GC
 ## Related Tools
 
 - [PerfView](https://github.com/microsoft/perfview) - Recommended trace collector on Windows
-- [dotnet-trace](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-trace) - EventPipe trace collection on macOS and Linux
+- [dotnet-trace](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-trace) - Alternative EventPipe trace collector
 - [SpeedScope](https://www.speedscope.app/) - Interactive flame graph visualization
