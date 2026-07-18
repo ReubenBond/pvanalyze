@@ -19,7 +19,9 @@ public sealed record TraceCapabilities(
 {
     public bool SupportsCpuStacks => CpuSampleCount > 0;
     public bool SupportsThreadTime => ContextSwitchCount > 0;
-    public bool SupportsActivityStacks => SupportsThreadTime && StartStopEventCount > 0;
+    public bool SupportsCpuActivityStacks => SupportsCpuStacks && StartStopEventCount > 0;
+    public bool SupportsThreadTimeActivityStacks => SupportsThreadTime && StartStopEventCount > 0;
+    public bool SupportsActivityStacks => SupportsCpuActivityStacks || SupportsThreadTimeActivityStacks;
 }
 
 public static class TraceCapabilityDetector
@@ -40,8 +42,7 @@ public static class TraceCapabilityDetector
             if (IsCpuSample(traceEvent))
                 cpuSamples++;
 
-            if (traceEvent is CSwitchTraceData ||
-                traceEvent is SampleTraceData { EventName: "cswitch" })
+            if (IsContextSwitch(traceEvent))
             {
                 contextSwitches++;
             }
@@ -103,4 +104,8 @@ public static class TraceCapabilityDetector
         (traceEvent is SampledProfileTraceData ||
          traceEvent is SampleTraceData { EventName: "cpu" } ||
          traceEvent is ClrThreadSampleTraceData { Type: ClrThreadSampleType.Managed });
+
+    internal static bool IsContextSwitch(TraceEvent traceEvent) =>
+        traceEvent is CSwitchTraceData ||
+        traceEvent is SampleTraceData { EventName: "cswitch" };
 }

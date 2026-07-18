@@ -60,9 +60,12 @@ public static class InfoCommand
                 $"{capabilities.CpuSampleCount:N0} samples", "cpustacks --stack-source cpu");
             PrintCapability("Thread time", capabilities.SupportsThreadTime,
                 $"{capabilities.ContextSwitchCount:N0} context switches", "stacks --stack-source threadtime");
-            PrintCapability("Async activities", capabilities.SupportsActivityStacks,
+            PrintCapability("CPU activities", capabilities.SupportsCpuActivityStacks,
+                $"{capabilities.CpuSampleCount:N0} CPU, {capabilities.StartStopEventCount:N0} Start/Stop",
+                "stacks --stack-source activity-cpu");
+            PrintCapability("Full activities", capabilities.SupportsThreadTimeActivityStacks,
                 $"{capabilities.ContextSwitchCount:N0} ctx, {capabilities.StartStopEventCount:N0} Start/Stop",
-                "stacks --stack-source activity");
+                "stacks --stack-source activity-threadtime");
             PrintCapability("Hardware counters", capabilities.HardwareCounterSampleCount > 0,
                 $"{capabilities.HardwareCounterSampleCount:N0} PMC samples", "events --type PMCSample");
             PrintCapability("GC", capabilities.GcEventCount > 0,
