@@ -7,7 +7,9 @@ A cross-platform command-line tool for analyzing .NET performance traces from
 
 ## Overview
 
-`pvanalyze` is a companion tool to PerfView that runs on **Mac, Linux, and Windows**. It provides command-line access to trace analysis capabilities, making it ideal for:
+`pvanalyze` is a companion tool to PerfView that runs on **Mac, Linux, and
+Windows**. PerfView collection requires Windows; `dotnet-trace` collection and
+`pvanalyze` analysis are cross-platform. The CLI is ideal for:
 
 - Automation and scripting
 - CI/CD pipelines
@@ -75,9 +77,11 @@ All analysis commands accept `.nettrace`, `.etl`, `.etl.zip`, and `.etlx`
 inputs. Raw and zipped traces are converted to an ETLX cache beside the source
 file; use `pvanalyze clean <trace-file>` to remove that cache.
 
-Run `pvanalyze info <trace-file>` first to see which analyses the captured
-events support. `cpustacks` and `calltree` reject stack sources whose required
-events are absent instead of returning incomplete results.
+Run `pvanalyze info <trace-file>` first. In addition to trace metadata and
+processes, it reports whether the captured events support CPU stacks,
+thread-time, async activities, hardware-counter inspection, GC, allocations,
+exceptions, and JIT analysis. `stacks` and `calltree` reject stack sources whose
+required events are absent instead of returning incomplete results.
 
 ### Analyze with pvanalyze
 
@@ -157,7 +161,9 @@ pvanalyze calltree trace.nettrace --hot-path --format json
 ### `info <trace-file>`
 
 Display basic trace metadata:
-- Duration, event count, processes
+- Duration, event count, and processes
+- Available analyses inferred from captured events
+- Event counts supporting each available analysis
 
 ### `gcstats <trace-file>`
 
@@ -178,10 +184,10 @@ Options:
 
 Analyze JIT compilation.
 
-### `cpustacks <trace-file>`
+### `cpustacks|stacks <trace-file>`
 
 Analyze CPU, thread-time, or async activity stacks:
-- Top methods by exclusive CPU time
+- Top methods by exclusive or inclusive metric
 - Thread-time analysis including blocked time from ETW context switches
 - Start/Stop activity grouping with task and await-time attribution
 - Group by module or namespace
@@ -218,10 +224,12 @@ pvanalyze stacks trace.etl.zip --stack-source threadtime --inclusive
 pvanalyze stacks trace.etl.zip --stack-source activity --inclusive
 ```
 
-`threadtime` and `activity` are most accurate with a PerfView trace collected
-using `/ThreadTime`. The `activity` source uses TraceEvent's Start/Stop activity
-computer and preserves events before a `--from` boundary so that activity state
-is reconstructed correctly before applying the requested time filter.
+`threadtime` and `activity` require a PerfView trace collected using
+`/ThreadTime`. `activity` additionally requires the relevant application
+providers to emit EventSource Start/Stop events with activity IDs. The activity
+source uses TraceEvent's Start/Stop activity computer and preserves events
+before a `--from` boundary so activity state is reconstructed correctly before
+applying the requested time filter.
 
 ### `alloc <trace-file>`
 
@@ -336,7 +344,7 @@ pvanalyze calltree trace.nettrace --hot-path --from 1000 --to 2000
 
 ## JSON Output for Agents
 
-All commands support `--format json` for machine-readable output:
+Commands that expose `--format json` produce machine-readable output:
 
 ```bash
 pvanalyze gcstats trace.nettrace --format json
