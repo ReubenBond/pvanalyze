@@ -104,7 +104,7 @@ public static class CallTreeCommand
             using var traceLog = new Etlx.TraceLog(etlxPath);
 
             var stackSource = StackSourceFactory.Create(
-                traceLog, stackSourceKind, fromMs, toMs, out stackSourceKind);
+                traceLog, stackSourceKind, fromMs, toMs, processId: null, out stackSourceKind);
 
             var callTree = new CallTree(ScalingPolicyKind.TimeMetric);
             callTree.StackSource = stackSource;

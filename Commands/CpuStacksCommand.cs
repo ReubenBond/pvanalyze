@@ -63,6 +63,10 @@ public static class CpuStacksCommand
             DefaultValueFactory = _ => "cpu",
             Description = "Stack source: cpu, threadtime, activity, activity-cpu, or activity-threadtime"
         };
+        var pidOption = new Option<int?>("--pid")
+        {
+            Description = "Filter CPU samples by process ID"
+        };
         stackSourceOption.AcceptOnlyFromAmong(
             "cpu", "threadtime", "activity", "activity-cpu", "activity-threadtime");
 
@@ -76,7 +80,8 @@ public static class CpuStacksCommand
             fromOption,
             toOption,
             inclusiveOption,
-            stackSourceOption
+            stackSourceOption,
+            pidOption
         };
         command.Aliases.Add("stacks");
 
@@ -91,14 +96,15 @@ public static class CpuStacksCommand
             var toMs = parseResult.GetValue(toOption)!;
             var inclusive = parseResult.GetValue(inclusiveOption)!;
             var stackSource = StackSourceFactory.ParseKind(parseResult.GetValue(stackSourceOption)!);
-            await Execute(traceFile, format, top, outputFile, groupBy, fromMs, toMs, inclusive, stackSource, cancellationToken).ConfigureAwait(false);
+            var pid = parseResult.GetValue(pidOption)!;
+            await Execute(traceFile, format, top, outputFile, groupBy, fromMs, toMs, inclusive, stackSource, pid, cancellationToken).ConfigureAwait(false);
         });
         return command;
     }
 
     private static async Task Execute(FileInfo traceFile, StackOutputFormat format, int top, FileInfo? outputFile,
         GroupBy groupBy, double? fromMs, double? toMs, bool sortByInclusive,
-        StackSourceKind stackSourceKind, CancellationToken cancellationToken)
+        StackSourceKind stackSourceKind, int? processId, CancellationToken cancellationToken)
     {
         if (!traceFile.Exists)
         {
@@ -113,7 +119,7 @@ public static class CpuStacksCommand
             using var traceLog = new Etlx.TraceLog(etlxPath);
             
             var stackSource = StackSourceFactory.Create(
-                traceLog, stackSourceKind, fromMs, toMs, out stackSourceKind);
+                traceLog, stackSourceKind, fromMs, toMs, processId, out stackSourceKind);
 
             switch (format)
             {

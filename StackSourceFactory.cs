@@ -27,6 +27,7 @@ internal static class StackSourceFactory
         StackSourceKind kind,
         double? fromMs,
         double? toMs,
+        int? processId,
         out StackSourceKind resolvedKind)
     {
         var capabilities = TraceCapabilityDetector.Detect(traceLog);
@@ -35,8 +36,14 @@ internal static class StackSourceFactory
 
         if (resolvedKind == StackSourceKind.Cpu)
         {
-            var events = TraceAnalyzer.GetCpuSampleEvents(traceLog, fromMs, toMs);
+            var events = TraceAnalyzer.GetCpuSampleEvents(traceLog, fromMs, toMs, processId);
             return CopyStackSource.Clone(new TraceEventStackSource(events));
+        }
+
+        if (processId.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Process filtering is currently supported only for the CPU stack source.");
         }
 
         if (resolvedKind == StackSourceKind.ActivityCpu)

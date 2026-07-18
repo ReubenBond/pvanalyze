@@ -979,7 +979,8 @@ public static class TraceAnalyzer
     internal static Etlx.TraceEvents GetCpuSampleEvents(
         Etlx.TraceLog traceLog,
         double? fromMs,
-        double? toMs)
+        double? toMs,
+        int? processId = null)
     {
         Etlx.TraceEvents events;
         if (fromMs.HasValue || toMs.HasValue)
@@ -994,7 +995,9 @@ public static class TraceAnalyzer
             events = traceLog.Events;
         }
 
-        return events.Filter(TraceCapabilityDetector.IsCpuSample);
+        return events.Filter(evt =>
+            TraceCapabilityDetector.IsCpuSample(evt)
+            && (!processId.HasValue || evt.ProcessID == processId.Value));
     }
 
     private static object[] BuildExceptionLane(Etlx.TraceLog traceLog, double startMs, double endMs,
