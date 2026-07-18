@@ -7,9 +7,9 @@ A cross-platform command-line tool for analyzing .NET performance traces from
 
 ## Overview
 
-`pvanalyze` is a companion tool to PerfView that runs on **Mac, Linux, and
-Windows**. PerfView collection requires Windows; `dotnet-trace` collection and
-`pvanalyze` analysis are cross-platform. The CLI is ideal for:
+`pvanalyze` runs on **macOS, Linux, and Windows**. Use PerfView to collect traces
+on Windows and `dotnet-trace` to collect them on macOS and Linux. Analysis with
+`pvanalyze` is cross-platform. The CLI is ideal for:
 
 - Automation and scripting
 - CI/CD pipelines
@@ -38,22 +38,15 @@ dotnet publish -c Release -r osx-arm64 --self-contained
 
 ### Collect a Trace
 
-Use `dotnet-trace` to collect traces on any platform:
+#### Windows: PerfView
 
-```bash
-# Install dotnet-trace (one-time)
-dotnet tool install --global dotnet-trace
+PerfView is the recommended collector on Windows. It can capture ETW kernel and
+runtime events, native stacks, context switches, and hardware counters that are
+not available in a standard EventPipe trace.
 
-# Collect a trace from a running process
-dotnet-trace collect --process-id <PID> --output trace.nettrace
-
-# Or collect while running an app
-dotnet-trace collect -- dotnet run
-```
-
-On Windows, choose a PerfView capture profile based on the question being
-investigated. Collecting more events has overhead, so do not use `/ThreadTime`
-or additional providers unless that data is needed.
+Choose a capture profile based on the question being investigated. Collecting
+more events has overhead, so do not use `/ThreadTime`, hardware counters, or
+additional providers unless that data is needed.
 
 | Investigation | PerfView capture | pvanalyze analysis |
 |---|---|---|
@@ -72,6 +65,21 @@ intervals for the current machine.
 # Stop collection by pressing S in the PerfView console.
 PerfView /AcceptEula /NoGui collect trace.etl.zip
 PerfView /AcceptEula /NoGui /ThreadTime collect threadtime.etl.zip
+```
+
+#### macOS and Linux: dotnet-trace
+
+Use `dotnet-trace` to collect EventPipe traces:
+
+```bash
+# Install dotnet-trace (one-time)
+dotnet tool install --global dotnet-trace
+
+# Collect a trace from a running process
+dotnet-trace collect --process-id <PID> --output trace.nettrace
+
+# Or collect while running an app
+dotnet-trace collect -- dotnet run
 ```
 
 All analysis commands accept `.nettrace`, `.etl`, `.etl.zip`, and `.etlx`
@@ -251,7 +259,8 @@ Analyze memory allocations by type:
 - Identifies Large Object Heap (LOH) allocations
 - Group by type, namespace, or module
 
-**Note:** Requires trace collected with allocation events:
+**Note:** Requires allocation events. On Windows, collect with PerfView's CLR
+providers. On macOS or Linux, use:
 ```bash
 dotnet-trace collect --providers "Microsoft-Windows-DotNETRuntime:0x200001:5" -- dotnet run
 ```
@@ -266,10 +275,13 @@ Options:
 
 Analyze DATAS (Dynamic Adaptation To Application Sizes) tuning decisions. DATAS dynamically adjusts heap count and gen0 budget on server GC. Requires .NET 9+ with `DOTNET_GCDynamicAdaptationMode=1` and GC events collected at verbose level.
 
-**Trace collection:**
+**Trace collection on macOS or Linux:**
 ```bash
 dotnet-trace collect -p <PID> --providers "Microsoft-Windows-DotNETRuntime:0x4C14FCCBD:5"
 ```
+
+On Windows, pass the equivalent CLR provider and keywords to PerfView using
+`/Providers`.
 
 Options:
 - `--samples` - Show per-GC samples (budget, TCP, MSL wait times)
@@ -383,6 +395,6 @@ pvanalyze events trace.nettrace --from 500 --to 1000 --type GC
 
 ## Related Tools
 
-- [dotnet-trace](https://docs.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-trace) - Cross-platform trace collection
-- [PerfView](https://github.com/microsoft/perfview) - Full-featured Windows GUI for trace analysis
+- [PerfView](https://github.com/microsoft/perfview) - Recommended trace collector on Windows
+- [dotnet-trace](https://learn.microsoft.com/dotnet/core/diagnostics/dotnet-trace) - EventPipe trace collection on macOS and Linux
 - [SpeedScope](https://www.speedscope.app/) - Interactive flame graph visualization
