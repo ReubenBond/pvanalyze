@@ -30,7 +30,7 @@ public static class CollectCommand
         profileOption.AcceptOnlyFromAmong("cpu", "gc-verbose", "none");
         var providersOption = new Option<string?>("--providers")
         {
-            Description = "Additional providers separated by ';' as Name:Keywords:Level"
+            Description = "Providers separated by ';' as Name:Keywords:Level[:key=value,key=value]"
         };
         var durationOption = new Option<double>("--duration-seconds")
         {
@@ -332,7 +332,7 @@ public static class CollectCommand
         }
     }
 
-    private static List<EventPipeProvider> CreateProviders(string profile, string? providerSpecs)
+    internal static List<EventPipeProvider> CreateProviders(string profile, string? providerSpecs)
     {
         var result = new List<EventPipeProvider>();
         switch (profile)
@@ -364,18 +364,60 @@ public static class CollectCommand
 
         foreach (var spec in providerSpecs.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var parts = spec.Split(':', 3, StringSplitOptions.TrimEntries);
-            if (parts.Length != 3
+            var parts = spec.Split(':', 4, StringSplitOptions.TrimEntries);
+            if (parts.Length is < 3 or > 4
                 || !TryParseInt64(parts[1], out var keywords)
                 || !int.TryParse(parts[2], out var level)
                 || !Enum.IsDefined(typeof(EventLevel), level))
             {
                 throw new ArgumentException(
-                    $"Invalid provider '{spec}'. Expected Name:Keywords:Level.",
+                    $"Invalid provider '{spec}'. Expected Name:Keywords:Level[:key=value,key=value].",
                     nameof(providerSpecs));
             }
 
-            result.Add(new EventPipeProvider(parts[0], (EventLevel)level, keywords));
+            IDictionary<string, string>? arguments = null;
+            if (parts.Length == 4)
+            {
+                arguments = ParseProviderArguments(parts[3], spec, providerSpecs);
+            }
+
+            result.Add(new EventPipeProvider(parts[0], (EventLevel)level, keywords, arguments));
+        }
+
+        return result;
+    }
+
+    private static Dictionary<string, string> ParseProviderArguments(
+        string value,
+        string spec,
+        string providerSpecs)
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var argument in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var separator = argument.IndexOf('=');
+            if (separator <= 0 || separator == argument.Length - 1)
+            {
+                throw new ArgumentException(
+                    $"Invalid provider argument '{argument}' in '{spec}'. Expected key=value.",
+                    nameof(providerSpecs));
+            }
+
+            var key = argument[..separator].Trim();
+            var argumentValue = argument[(separator + 1)..].Trim();
+            if (!result.TryAdd(key, argumentValue))
+            {
+                throw new ArgumentException(
+                    $"Duplicate provider argument '{key}' in '{spec}'.",
+                    nameof(providerSpecs));
+            }
+        }
+
+        if (result.Count == 0)
+        {
+            throw new ArgumentException(
+                $"Provider '{spec}' has an empty argument list.",
+                nameof(providerSpecs));
         }
 
         return result;

@@ -68,8 +68,16 @@ pvanalyze collect --process-id <PID> --profile none \
   --duration-seconds 30 --output runtime.nettrace
 ```
 
-Provider specifications use `Name:Keywords:Level`; separate multiple providers
-with semicolons.
+Provider specifications use
+`Name:Keywords:Level[:key=value,key=value]`; separate multiple providers with
+semicolons. Provider arguments are passed unchanged to `EventPipeProvider`.
+For example:
+
+```bash
+pvanalyze collect --process-id <PID> --profile none \
+  --providers "Microsoft-Orleans-RpcLatency:0x3:5:SampleRate=64" \
+  --duration-seconds 30 --output rpc.nettrace
+```
 
 #### dotnet-trace
 
