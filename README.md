@@ -70,8 +70,17 @@ pvanalyze collect --process-id <PID> --profile none \
   --duration-seconds 30 --output runtime.nettrace
 ```
 
-Provider specifications use `Name:Keywords:Level`; separate multiple providers
-with semicolons.
+Provider specifications use
+`Name:Keywords:Level[:key=value,key=value]`; separate multiple providers with
+semicolons. Provider arguments are passed unchanged to `EventPipeProvider`.
+For example, Orleans RPC population sampling can be overridden at collection
+time:
+
+```bash
+pvanalyze collect --process-id <PID> --profile none \
+  --providers "Microsoft-Orleans-RpcLatency:0x3:5:SampleRate=64" \
+  --duration-seconds 30 --output rpc.nettrace
+```
 
 #### Windows: PerfView
 
@@ -173,6 +182,11 @@ pvanalyze events trace.etl.zip --type PMCSample
 # Filter by PID, TID, or payload content
 pvanalyze events trace.nettrace --pid 1234
 pvanalyze events trace.nettrace --payload "ConnectionReset"
+
+# Reconstruct Orleans RPC latency phases and queues
+pvanalyze phases rpc.nettrace --measurement-window --queues
+pvanalyze latency rpc.etl --trace-id 4bf92f3577b34da6a3ce929d0e0e4736 --timeline
+pvanalyze phases rpc.etl --origin-silo 11111:123456 --queue activation --format json
 
 # Time-filtered events
 pvanalyze events trace.nettrace --from 1000 --to 2000
@@ -290,6 +304,41 @@ Options:
 - `--top <N>` - Number of types to show
 - `--group-by type|namespace|module` - Aggregation level
 - `--from <ms>` / `--to <ms>` - Time range filter
+
+### `phases|latency <trace-file>`
+
+Reconstruct calls emitted by `Microsoft-Orleans-RpcLatency/Phase` in one pass,
+keyed by exact trace ID (when present), origin silo, and correlation ID.
+Durations come from phase markers rather than sampled stacks. The report
+includes phase percentiles, standard deviation, median absolute deviation,
+completeness and ordering diagnostics, sampling metadata, and optional queue
+residency/depth analysis.
+
+```bash
+# One-process EventPipe capture and analysis
+pvanalyze collect --profile none \
+  --providers "Microsoft-Orleans-RpcLatency:0x3:5:SampleRate=64" \
+  --duration-seconds 45 --output rpc.nettrace -- dotnet Benchmarks.dll
+pvanalyze phases rpc.nettrace --measurement-window --queues
+
+# A split-process ETW trace uses one shared QPC clock
+PerfView /AcceptEula /NoGui /Providers:*Microsoft-Orleans-RpcLatency \
+  /DataFile:rpc.etl collect
+pvanalyze phases rpc.etl --process-role driver --queues --format json \
+  --output rpc-phases.json
+
+# Inspect one exact probe
+pvanalyze phases rpc.etl \
+  --trace-id 4bf92f3577b34da6a3ce929d0e0e4736 --timeline --queues
+```
+
+Filters include `--pid`, `--process`, `--process-role` (the origin process),
+`--origin-silo port:generation`, `--trace-id`, `--correlation-id`, `--from`,
+`--to`, and `--measurement-window`. `--successful-only` defaults to true.
+Use `--include-incomplete` and `--min-completeness` to control damaged or
+window-truncated samples. `--queue <name-or-kind>` restricts queue output.
+Independent EventPipe traces from separate processes cannot be combined
+without clock synchronization; use a single ETW capture for split processes.
 
 ### `datas <trace-file>`
 

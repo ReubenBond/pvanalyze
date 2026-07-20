@@ -76,6 +76,8 @@ public static class InfoCommand
                 $"{capabilities.ExceptionEventCount:N0} exception events", "exceptions");
             PrintCapability("JIT", capabilities.JitEventCount > 0,
                 $"{capabilities.JitEventCount:N0} JIT events", "jitstats");
+            PrintCapability("Orleans RPC phases", capabilities.SupportsRpcPhases,
+                $"{capabilities.RpcPhaseEventCount:N0} Phase events", "phases --queues");
             Console.WriteLine();
 
             Console.WriteLine("=== Processes ===");

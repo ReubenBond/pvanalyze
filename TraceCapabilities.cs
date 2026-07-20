@@ -15,13 +15,15 @@ public sealed record TraceCapabilities(
     long GcEventCount,
     long AllocationEventCount,
     long ExceptionEventCount,
-    long JitEventCount)
+    long JitEventCount,
+    long RpcPhaseEventCount)
 {
     public bool SupportsCpuStacks => CpuSampleCount > 0;
     public bool SupportsThreadTime => ContextSwitchCount > 0;
     public bool SupportsCpuActivityStacks => SupportsCpuStacks && StartStopEventCount > 0;
     public bool SupportsThreadTimeActivityStacks => SupportsThreadTime && StartStopEventCount > 0;
     public bool SupportsActivityStacks => SupportsCpuActivityStacks || SupportsThreadTimeActivityStacks;
+    public bool SupportsRpcPhases => RpcPhaseEventCount > 0;
 }
 
 public static class TraceCapabilityDetector
@@ -36,6 +38,7 @@ public static class TraceCapabilityDetector
         long allocationEvents = 0;
         long exceptionEvents = 0;
         long jitEvents = 0;
+        long rpcPhaseEvents = 0;
 
         foreach (var traceEvent in traceLog.Events)
         {
@@ -86,6 +89,9 @@ public static class TraceCapabilityDetector
             {
                 gcEvents++;
             }
+
+            if (RpcPhaseProjector.IsRpcPhaseEvent(traceEvent))
+                rpcPhaseEvents++;
         }
 
         return new TraceCapabilities(
@@ -96,7 +102,8 @@ public static class TraceCapabilityDetector
             gcEvents,
             allocationEvents,
             exceptionEvents,
-            jitEvents);
+            jitEvents,
+            rpcPhaseEvents);
     }
 
     internal static bool IsCpuSample(TraceEvent traceEvent) =>
