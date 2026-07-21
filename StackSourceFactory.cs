@@ -40,15 +40,9 @@ internal static class StackSourceFactory
             return CopyStackSource.Clone(new TraceEventStackSource(events));
         }
 
-        if (processId.HasValue)
-        {
-            throw new InvalidOperationException(
-                "Process filtering is currently supported only for the CPU stack source.");
-        }
-
         if (resolvedKind == StackSourceKind.ActivityCpu)
         {
-            var activityCpuSource = CreateCpuActivityStackSource(traceLog);
+            var activityCpuSource = CreateCpuActivityStackSource(traceLog, processId);
             return FilterByTime(activityCpuSource, fromMs, toMs);
         }
 
@@ -65,10 +59,16 @@ internal static class StackSourceFactory
 #pragma warning restore CS0618
         computer.GenerateThreadTimeStacks(stackSource);
 
-        return FilterByTime(stackSource, fromMs, toMs);
+        StackSource result = stackSource;
+        if (processId.HasValue)
+        {
+            result = FilterByProcess(result, processId.Value);
+        }
+
+        return FilterByTime(result, fromMs, toMs);
     }
 
-    private static StackSource CreateCpuActivityStackSource(Etlx.TraceLog traceLog)
+    private static StackSource CreateCpuActivityStackSource(Etlx.TraceLog traceLog, int? processId)
     {
         // Attribute actual CPU samples without introducing simulated blocked, await, or unknown time.
         var stackSource = new MutableTraceEventStackSource(traceLog);
@@ -81,7 +81,8 @@ internal static class StackSourceFactory
 
         void AddSample(TraceEvent traceEvent, float metric)
         {
-            if (traceEvent.ProcessID == 0)
+            if (traceEvent.ProcessID == 0
+                || (processId.HasValue && traceEvent.ProcessID != processId.Value))
                 return;
 
             var thread = traceEvent.Thread();
@@ -113,6 +114,29 @@ internal static class StackSourceFactory
         eventSource.Process();
         stackSource.DoneAddingSamples();
         return stackSource;
+    }
+
+    private static StackSource FilterByProcess(StackSource stackSource, int processId)
+    {
+        var result = new CopyStackSource(stackSource);
+        var processIdMarker = $" ({processId})";
+        stackSource.ForEach(sample =>
+        {
+            for (var stackIndex = sample.StackIndex;
+                stackIndex != StackSourceCallStackIndex.Invalid;
+                stackIndex = stackSource.GetCallerIndex(stackIndex))
+            {
+                var frameName = stackSource.GetFrameName(stackSource.GetFrameIndex(stackIndex), verboseName: false);
+                if (frameName.StartsWith("Process", StringComparison.Ordinal)
+                    && frameName.Contains(processIdMarker, StringComparison.Ordinal))
+                {
+                    result.AddSample(sample);
+                    break;
+                }
+            }
+        });
+
+        return result;
     }
 
     private static StackSource FilterByTime(
